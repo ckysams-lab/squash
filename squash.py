@@ -74,77 +74,74 @@ else:
         st.rerun()
 
 st.sidebar.markdown("---")
-menu = st.sidebar.radio("功能選單", [
-    "1. 學費預算計算 (需登入)", 
-    "2. 訓練班日程表", 
-    "3. 隊員排行榜", 
-    "4. 點名與統計", 
-    "5. 比賽活動公告"
-])
 
-# --- 1. 學費預算計算 (增加密碼保護邏輯) ---
-if menu == "1. 學費預算計算 (需登入)":
-    st.title("💰 下一期通告學費核算")
+# 動態生成選單：只有登入後才顯示「學費預算計算」
+menu_options = []
+if st.session_state.is_admin:
+    menu_options.append("💰 學費預算計算 (管理專用)")
+menu_options.extend(["📅 訓練班日程表", "🏆 隊員排行榜", "📝 點名與統計", "📢 比賽活動公告"])
+
+menu = st.sidebar.radio("功能選單", menu_options)
+
+# --- 1. 學費預算計算 (僅在 is_admin 為 True 時可見) ---
+if menu == "💰 學費預算計算 (管理專用)":
+    st.title("💰 下一期通告學費核算 (管理員模式)")
     
-    if not st.session_state.is_admin:
-        st.warning("⚠️ 此頁面包含機密財政預算，請先在左側邊欄輸入管理員密碼以查看內容。")
-        st.info("提示：如果您是老師或負責人，請登入以調整各班別單價及人數。")
+    st.subheader("⚙️ 第一步：成本單價設定")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.session_state.unit_costs["校隊班"] = st.number_input("校隊班 單價 ($)", value=float(st.session_state.unit_costs["校隊班"]), key="input_uc_team")
+    with c2:
+        st.session_state.unit_costs["培訓班"] = st.number_input("初/中/精英班 單價 ($)", value=float(st.session_state.unit_costs["培訓班"]), key="input_uc_train")
+    with c3:
+        st.session_state.unit_costs["興趣班"] = st.number_input("興趣班 單價 ($)", value=float(st.session_state.unit_costs["興趣班"]), key="input_uc_hobby")
+
+    st.markdown("---")
+    st.subheader("👥 第二步：輸入報名班數及參加人數")
+    col_in1, col_in2, col_in3 = st.columns(3)
+    with col_in1:
+        st.markdown("**校隊系列**")
+        n_team = st.number_input("開辦班數", min_value=0, value=1, key="calc_n_t")
+        s_team = st.number_input("參加總人數", min_value=0, value=12, key="calc_s_t")
+    with col_in2:
+        st.markdown("**培訓系列**")
+        n_train = st.number_input("開辦班數 ", min_value=0, value=4, key="calc_n_tr")
+        s_train = st.number_input("參加總人數 ", min_value=0, value=48, key="calc_s_tr")
+    with col_in3:
+        st.markdown("**興趣班系列**")
+        n_hobby = st.number_input("開辦班數  ", min_value=0, value=3, key="calc_n_h")
+        s_hobby = st.number_input("參加總人數  ", min_value=0, value=48, key="calc_s_h")
+
+    st.markdown("---")
+    st.subheader("📊 第三步：全校平均核算結果")
+    notice_fee = st.number_input("通告擬定每位學生收費 ($)", value=250.0, key="notice_fee_input")
+    
+    total_cost = (n_team * st.session_state.unit_costs["校隊班"]) + \
+                 (n_train * st.session_state.unit_costs["培訓班"]) + \
+                 (n_hobby * st.session_state.unit_costs["興趣班"])
+    total_students = s_team + s_train + s_hobby
+    
+    if total_students > 0:
+        avg_cost = total_cost / total_students
+        total_income = total_students * notice_fee
+        subsidy = total_cost - total_income
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("三類總成本", f"${total_cost:,.0f}")
+        m2.metric("平均每人成本", f"${avg_cost:.1f}")
+        m3.metric("津貼需資助額", f"${max(0, subsidy):,.0f}")
+        
+        st.info(f"💡 公式說明：(${total_cost:,.0f} 總成本) / ({total_students} 總人數) = ${avg_cost:.1f} (平均每人成本)")
+        if subsidy > 0:
+            st.success(f"每位同學獲得資助：${avg_cost - notice_fee:.1f} 元")
     else:
-        st.subheader("⚙️ 第一步：成本單價設定")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.session_state.unit_costs["校隊班"] = st.number_input("校隊班 單價 ($)", value=float(st.session_state.unit_costs["校隊班"]), key="input_uc_team")
-        with c2:
-            st.session_state.unit_costs["培訓班"] = st.number_input("初/中/精英班 單價 ($)", value=float(st.session_state.unit_costs["培訓班"]), key="input_uc_train")
-        with c3:
-            st.session_state.unit_costs["興趣班"] = st.number_input("興趣班 單價 ($)", value=float(st.session_state.unit_costs["興趣班"]), key="input_uc_hobby")
+        st.warning("請輸入參加人數以獲取計算結果。")
 
-        st.markdown("---")
-        st.subheader("👥 第二步：輸入報名班數及參加人數")
-        col_in1, col_in2, col_in3 = st.columns(3)
-        with col_in1:
-            st.markdown("**校隊系列**")
-            n_team = st.number_input("開辦班數", min_value=0, value=1, key="calc_n_t")
-            s_team = st.number_input("參加總人數", min_value=0, value=12, key="calc_s_t")
-        with col_in2:
-            st.markdown("**培訓系列**")
-            n_train = st.number_input("開辦班數 ", min_value=0, value=4, key="calc_n_tr")
-            s_train = st.number_input("參加總人數 ", min_value=0, value=48, key="calc_s_tr")
-        with col_in3:
-            st.markdown("**興趣班系列**")
-            n_hobby = st.number_input("開辦班數  ", min_value=0, value=3, key="calc_n_h")
-            s_hobby = st.number_input("參加總人數  ", min_value=0, value=48, key="calc_s_h")
-
-        st.markdown("---")
-        st.subheader("📊 第三步：全校平均核算結果")
-        notice_fee = st.number_input("通告擬定每位學生收費 ($)", value=250.0, key="notice_fee_input")
-        
-        total_cost = (n_team * st.session_state.unit_costs["校隊班"]) + \
-                     (n_train * st.session_state.unit_costs["培訓班"]) + \
-                     (n_hobby * st.session_state.unit_costs["興趣班"])
-        total_students = s_team + s_train + s_hobby
-        
-        if total_students > 0:
-            avg_cost = total_cost / total_students
-            total_income = total_students * notice_fee
-            subsidy = total_cost - total_income
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric("三類總成本", f"${total_cost:,.0f}")
-            m2.metric("平均每人成本", f"${avg_cost:.1f}")
-            m3.metric("津貼需資助額", f"${max(0, subsidy):,.0f}")
-            
-            st.info(f"💡 公式說明：(${total_cost:,.0f} 總成本) / ({total_students} 總人數) = ${avg_cost:.1f} (平均每人成本)")
-            if subsidy > 0:
-                st.success(f"每位同學獲得資助：${avg_cost - notice_fee:.1f} 元")
-        else:
-            st.warning("請輸入參加人數以獲取計算結果。")
-
-# --- 2. 訓練班日程表 (保持開放，但管理員可編輯) ---
-elif menu == "2. 訓練班日程表":
-    st.title("📅 訓練班日程管理")
+# --- 2. 訓練班日程表 ---
+elif menu == "📅 訓練班日程表":
+    st.title("📅 訓練班日程閱覽")
     if st.session_state.is_admin:
-        st.write("🔧 您現在具有編輯權限，可直接在表格中修改：")
+        st.write("🔧 管理員模式：可直接在表格中編輯數據")
         edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True, key="schedule_editor")
         if st.button("確認更新日程表"):
             st.session_state.schedule_df = edited_df
@@ -152,15 +149,15 @@ elif menu == "2. 訓練班日程表":
     else:
         st.table(st.session_state.schedule_df)
 
-# --- 3. 隊員排行榜 (保持開放) ---
-elif menu == "3. 隊員排行榜":
+# --- 3. 隊員排行榜 ---
+elif menu == "🏆 隊員排行榜":
     st.title("🏆 壁球隊 TOP 隊員排行榜")
     top_players = st.session_state.players_df.sort_values(by="積分", ascending=False).reset_index(drop=True)
     top_players.index += 1
     st.table(top_players)
 
-# --- 4. 點名與統計 (保持開放查看，管理員可修改數據) ---
-elif menu == "4. 點名與統計":
+# --- 4. 點名與統計 ---
+elif menu == "📝 點名與統計":
     st.title("📝 點名紀錄與出席率統計")
     if st.session_state.is_admin:
         edited_players = st.data_editor(st.session_state.players_df, use_container_width=True, key="attendance_editor")
@@ -171,8 +168,8 @@ elif menu == "4. 點名與統計":
         st.dataframe(st.session_state.players_df[["姓名", "年級", "班級", "出席率"]], use_container_width=True)
     st.button("導出點名月報 (Excel格式預覽)")
 
-# --- 5. 比賽活動公告 (保持開放) ---
-elif menu == "5. 比賽活動公告":
+# --- 5. 比賽活動公告 ---
+elif menu == "📢 比賽活動公告":
     st.title("📅 壁球活動公告與報名日曆")
     
     if st.session_state.is_admin:
