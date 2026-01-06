@@ -80,11 +80,21 @@ if menu == "📢 比賽活動公告":
                 new_pdf = st.text_input("報名表 PDF 連結 (可選)")
                 submitted = st.form_submit_button("立即發布")
                 if submitted and new_title:
-                    new_id = int(max([e["id"] for e in st.session_state.events_list]) + 1) if st.session_state.events_list else 1
-                    # 確保 pdf_url 儲存為字串
+                    # 計算 ID，預防空列表
+                    max_id = 0
+                    if st.session_state.events_list:
+                        max_id = max(e["id"] for e in st.session_state.events_list)
+                    
+                    new_id = int(max_id + 1)
+                    
                     st.session_state.events_list.append({
-                        "id": new_id, "活動": new_title, "日期": str(new_date),
-                        "地點": new_loc, "狀態": "接受報名", "pdf_url": str(new_pdf).strip() if new_pdf else "", "interested": 0
+                        "id": new_id, 
+                        "活動": str(new_title), 
+                        "日期": str(new_date),
+                        "地點": str(new_loc), 
+                        "狀態": "接受報名", 
+                        "pdf_url": str(new_pdf).strip() if new_pdf else "", 
+                        "interested": 0
                     })
                     st.success("活動已發布！")
                     st.rerun()
@@ -92,6 +102,7 @@ if menu == "📢 比賽活動公告":
     if not st.session_state.events_list:
         st.write("目前沒有進行中的活動。")
     else:
+        # 使用副本遍歷以避免刪除索引錯誤
         for idx, ev in enumerate(list(st.session_state.events_list)):
             with st.container(border=True):
                 col1, col2 = st.columns([3, 1])
@@ -101,21 +112,22 @@ if menu == "📢 比賽活動公告":
                     st.write(f"🔥 目前已有 **{ev['interested']}** 人表示有興趣")
                 with col2:
                     e_id = ev.get("id", idx)
+                    
                     if st.button("🙋 我感興趣", key=f"int_btn_{e_id}"):
                         st.session_state.events_list[idx]["interested"] += 1
                         st.toast("已記錄你的興趣！")
                         st.rerun()
                     
-                    # 修正 TypeError：嚴格檢查 pdf_url
+                    # 徹底修復 TypeError: 確保 pdf_url 絕對是合法的非空字串
                     raw_url = ev.get("pdf_url", "")
-                    # 將可能出現的 None 或 NaN 轉換為空字串
-                    pdf_url = str(raw_url).strip() if pd.notna(raw_url) else ""
+                    # 過濾掉可能是 None 或 NaN 的值
+                    clean_url = str(raw_url).strip() if (raw_url and not pd.isna(raw_url)) else ""
                     
-                    # 只有當網址不為空且以 http 開頭時才使用 link_button
-                    if pdf_url and pdf_url.lower().startswith("http"):
-                        st.link_button("📄 下載報名表", pdf_url, key=f"pdf_link_{e_id}")
+                    # 只有網址格式正確才顯示 link_button
+                    if clean_url.lower().startswith("http"):
+                        st.link_button("📄 下載報名表", clean_url, key=f"pdf_link_{e_id}_{idx}")
                     else:
-                        st.button("📄 無報名表", disabled=True, key=f"pdf_disabled_{e_id}", help="此活動未提供有效連結")
+                        st.button("📄 無報名表", disabled=True, key=f"pdf_no_link_{e_id}_{idx}", help="尚未提供有效下載連結")
                     
                     if st.session_state.is_admin:
                         if st.button("🗑️ 刪除活動", key=f"del_btn_{e_id}", type="primary"):
