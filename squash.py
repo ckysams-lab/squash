@@ -75,7 +75,7 @@ else:
 
 st.sidebar.markdown("---")
 
-# 動態生成選單：只有登入後才顯示「學費預算計算」
+# 動態生成選單
 menu_options = []
 if st.session_state.is_admin:
     menu_options.append("💰 學費預算計算 (管理專用)")
@@ -83,7 +83,7 @@ menu_options.extend(["📅 訓練班日程表", "🏆 隊員排行榜", "📝 �
 
 menu = st.sidebar.radio("功能選單", menu_options)
 
-# --- 1. 學費預算計算 (僅在 is_admin 為 True 時可見) ---
+# --- 1. 學費預算計算 ---
 if menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 下一期通告學費核算 (管理員模式)")
     
@@ -132,8 +132,6 @@ if menu == "💰 學費預算計算 (管理專用)":
         m3.metric("津貼需資助額", f"${max(0, subsidy):,.0f}")
         
         st.info(f"💡 公式說明：(${total_cost:,.0f} 總成本) / ({total_students} 總人數) = ${avg_cost:.1f} (平均每人成本)")
-        if subsidy > 0:
-            st.success(f"每位同學獲得資助：${avg_cost - notice_fee:.1f} 元")
     else:
         st.warning("請輸入參加人數以獲取計算結果。")
 
@@ -149,9 +147,31 @@ elif menu == "📅 訓練班日程表":
     else:
         st.table(st.session_state.schedule_df)
 
-# --- 3. 隊員排行榜 ---
+# --- 3. 隊員排行榜 (新增 Excel 匯入功能) ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 壁球隊 TOP 隊員排行榜")
+    
+    if st.session_state.is_admin:
+        with st.expander("📥 管理員功能：從 Excel 匯入隊員資料"):
+            st.write("請上傳包含以下欄位的 Excel 檔案：`姓名`, `年級`, `積分`, `班級`, `出席率`")
+            uploaded_file = st.file_uploader("選擇 Excel 檔案", type=["xlsx", "xls"], key="uploader_ranking")
+            
+            if uploaded_file is not None:
+                try:
+                    df_import = pd.read_excel(uploaded_file)
+                    required_cols = ["姓名", "年級", "積分", "班級", "出席率"]
+                    if all(col in df_import.columns for col in required_cols):
+                        if st.button("確認匯入並覆蓋現有資料"):
+                            st.session_state.players_df = df_import[required_cols].copy()
+                            st.success("資料匯入成功！")
+                            st.rerun()
+                    else:
+                        st.error(f"匯入失敗！檔案必須包含以下欄位：{', '.join(required_cols)}")
+                except Exception as e:
+                    st.error(f"讀取檔案時發生錯誤：{e}")
+
+    st.markdown("---")
+    # 顯示排行榜
     top_players = st.session_state.players_df.sort_values(by="積分", ascending=False).reset_index(drop=True)
     top_players.index += 1
     st.table(top_players)
@@ -159,13 +179,24 @@ elif menu == "🏆 隊員排行榜":
 # --- 4. 點名與統計 ---
 elif menu == "📝 點名與統計":
     st.title("📝 點名紀錄與出席率統計")
+    display_cols = ["姓名", "年級", "班級", "出席率"]
+    
     if st.session_state.is_admin:
-        edited_players = st.data_editor(st.session_state.players_df, use_container_width=True, key="attendance_editor")
+        st.write("🔧 管理員模式：可直接更新學員出席狀態")
+        edited_players_subset = st.data_editor(
+            st.session_state.players_df[display_cols], 
+            use_container_width=True, 
+            key="attendance_editor",
+            num_rows="dynamic"
+        )
         if st.button("儲存點名變更"):
-            st.session_state.players_df = edited_players
-            st.success("數據已更新！")
+            # 更新對應欄位
+            for col in display_cols:
+                st.session_state.players_df[col] = edited_players_subset[col].values
+            st.success("出席紀錄已更新！")
     else:
-        st.dataframe(st.session_state.players_df[["姓名", "年級", "班級", "出席率"]], use_container_width=True)
+        st.dataframe(st.session_state.players_df[display_cols], use_container_width=True)
+    
     st.button("導出點名月報 (Excel格式預覽)")
 
 # --- 5. 比賽活動公告 ---
