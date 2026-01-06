@@ -271,6 +271,4 @@ elif menu == "💰 學費預算計算 (管理專用)":
     m1, m2, m3 = st.columns(3)
     m1.metric("總支出預算", f"${total_cost:,}")
     m2.metric("總收入預算", f"${total_income:,}")
-    m3.metric("損益差額", f"${balance:,}", delta=f"{balance:,}")al_cost:,}")
-    m2.metric("總收入預算", f"${total_income:,}")
-    m3.metric("損益差額", f"${total_income - total_cost:,}")
+    m3.metric("損益差額", f"${balance:,}", delta=f"{balance:,}"),}")
