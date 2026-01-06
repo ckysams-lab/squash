@@ -81,9 +81,10 @@ if menu == "📢 比賽活動公告":
                 submitted = st.form_submit_button("立即發布")
                 if submitted and new_title:
                     new_id = int(max([e["id"] for e in st.session_state.events_list]) + 1) if st.session_state.events_list else 1
+                    # 確保 pdf_url 儲存為字串
                     st.session_state.events_list.append({
                         "id": new_id, "活動": new_title, "日期": str(new_date),
-                        "地點": new_loc, "狀態": "接受報名", "pdf_url": str(new_pdf).strip(), "interested": 0
+                        "地點": new_loc, "狀態": "接受報名", "pdf_url": str(new_pdf).strip() if new_pdf else "", "interested": 0
                     })
                     st.success("活動已發布！")
                     st.rerun()
@@ -99,17 +100,22 @@ if menu == "📢 比賽活動公告":
                     st.write(f"📅 **日期**: {ev['日期']} | 📍 **地點**: {ev['地點']}")
                     st.write(f"🔥 目前已有 **{ev['interested']}** 人表示有興趣")
                 with col2:
-                    e_id = ev["id"]
+                    e_id = ev.get("id", idx)
                     if st.button("🙋 我感興趣", key=f"int_btn_{e_id}"):
                         st.session_state.events_list[idx]["interested"] += 1
                         st.toast("已記錄你的興趣！")
                         st.rerun()
                     
-                    pdf_url = ev.get("pdf_url", "")
-                    if isinstance(pdf_url, str) and pdf_url.startswith("http"):
+                    # 修正 TypeError：嚴格檢查 pdf_url
+                    raw_url = ev.get("pdf_url", "")
+                    # 將可能出現的 None 或 NaN 轉換為空字串
+                    pdf_url = str(raw_url).strip() if pd.notna(raw_url) else ""
+                    
+                    # 只有當網址不為空且以 http 開頭時才使用 link_button
+                    if pdf_url and pdf_url.lower().startswith("http"):
                         st.link_button("📄 下載報名表", pdf_url, key=f"pdf_link_{e_id}")
                     else:
-                        st.button("📄 無報名表", disabled=True, key=f"pdf_disabled_{e_id}", help="此活動未提供有效網址")
+                        st.button("📄 無報名表", disabled=True, key=f"pdf_disabled_{e_id}", help="此活動未提供有效連結")
                     
                     if st.session_state.is_admin:
                         if st.button("🗑️ 刪除活動", key=f"del_btn_{e_id}", type="primary"):
@@ -234,7 +240,7 @@ elif menu == "💰 學費預算計算 (管理專用)":
     st.divider()
     fee = st.number_input("每位學生預計收費 ($)", 250)
     
-    # 計算邏輯：直接 班級數 * 單班總成本
+    # 計算邏輯
     total_cost = (n_t * cost_team) + (n_tr * cost_train) + (n_h * cost_hobby)
     total_income = (p_t + p_tr + p_h) * fee
     balance = total_income - total_cost
