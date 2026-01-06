@@ -8,19 +8,25 @@ st.set_page_config(page_title="正覺壁球管理系統", layout="wide")
 # --- 1. 安全權限與數據初始化 ---
 ADMIN_PASSWORD = "8888"
 
-# 初始化管理員狀態
+# 確保管理員狀態初始化
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
 
-# 初始化成本單價 (預設值參考通告原始成本)
-if 'unit_costs' not in st.session_state:
-    st.session_state.unit_costs = {
-        "校隊班": 2750.0,
-        "培訓班": 1350.0,
-        "興趣班": 1200.0
-    }
+# --- 強化初始化邏輯 ---
+default_unit_costs = {
+    "校隊班": 2750.0,
+    "培訓班": 1350.0,
+    "興趣班": 1200.0
+}
 
-# 初始化訓練班日程 (根據 PDF 通告內容)
+if 'unit_costs' not in st.session_state:
+    st.session_state.unit_costs = default_unit_costs.copy()
+else:
+    for key, val in default_unit_costs.items():
+        if key not in st.session_state.unit_costs:
+            st.session_state.unit_costs[key] = val
+
+# 初始化訓練班日程
 if 'schedule_df' not in st.session_state:
     st.session_state.schedule_df = pd.DataFrame([
         {"班級": "星期二小型壁球興趣班", "地點": "學校室內操場", "時間": "15:30-16:30", "日期": "1/20-3/31", "堂數": 8},
@@ -40,17 +46,21 @@ if 'players_df' not in st.session_state:
         {"姓名": "趙子龍", "年級": "3D", "積分": 88, "班級": "中級班", "出席率": "85%"},
     ])
 
-# 初始化活動公告
+# 初始化活動公告 (確保欄位定義明確)
 if 'events_df' not in st.session_state:
-    st.session_state.events_df = pd.DataFrame([
+    st.session_state.events_df = pd.DataFrame(columns=["活動", "日期", "地點", "類型", "狀態"])
+    # 預設數據
+    initial_events = [
         {"活動": "全港小學校際壁球比賽", "日期": "2026-03-15", "地點": "歌和老街壁球中心", "類型": "比賽", "狀態": "接受報名"},
         {"活動": "壁球同樂日", "日期": "2026-04-10", "地點": "香港壁球中心", "類型": "校外活動", "狀態": "尚未開始"}
-    ])
+    ]
+    st.session_state.events_df = pd.DataFrame(initial_events)
 
 # 密碼檢查函數
 def check_password():
     if st.session_state.get("pwd_input") == ADMIN_PASSWORD:
         st.session_state.is_admin = True
+        st.success("管理員解鎖成功！")
     else:
         st.error("密碼錯誤！")
 
@@ -76,16 +86,15 @@ menu = st.sidebar.radio("功能選單", [
 # --- 1. 學費預算計算 ---
 if menu == "1. 學費預算計算":
     st.title("💰 下一期通告學費核算")
-    
     st.subheader("⚙️ 第一步：成本單價設定 (由管理員修改)")
     if st.session_state.is_admin:
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.session_state.unit_costs["校隊班"] = st.number_input("校隊班 單價 ($)", value=float(st.session_state.unit_costs["校隊班"]))
+            st.session_state.unit_costs["校隊班"] = st.number_input("校隊班 單價 ($)", value=float(st.session_state.unit_costs["校隊班"]), key="input_uc_team")
         with c2:
-            st.session_state.unit_costs["培訓班"] = st.number_input("初/中/精英班 單價 ($)", value=float(st.session_state.unit_costs["培訓班"]))
+            st.session_state.unit_costs["培訓班"] = st.number_input("初/中/精英班 單價 ($)", value=float(st.session_state.unit_costs["培訓班"]), key="input_uc_train")
         with c3:
-            st.session_state.unit_costs["興趣班"] = st.number_input("興趣班 單價 ($)", value=float(st.session_state.unit_costs["興趣班"]))
+            st.session_state.unit_costs["興趣班"] = st.number_input("興趣班 單價 ($)", value=float(st.session_state.unit_costs["興趣班"]), key="input_uc_hobby")
     else:
         st.info(f"當前單價設定：校隊班 ${st.session_state.unit_costs['校隊班']} | 培訓班 ${st.session_state.unit_costs['培訓班']} | 興趣班 ${st.session_state.unit_costs['興趣班']}")
 
@@ -107,9 +116,8 @@ if menu == "1. 學費預算計算":
 
     st.markdown("---")
     st.subheader("📊 第三步：全校平均核算結果")
-    notice_fee = st.number_input("通告擬定每位學生收費 ($)", value=250.0)
+    notice_fee = st.number_input("通告擬定每位學生收費 ($)", value=250.0, key="notice_fee_input")
     
-    # 執行公式: (三類班別總價) / (所有班參加人數)
     total_cost = (n_team * st.session_state.unit_costs["校隊班"]) + \
                  (n_train * st.session_state.unit_costs["培訓班"]) + \
                  (n_hobby * st.session_state.unit_costs["興趣班"])
@@ -126,6 +134,8 @@ if menu == "1. 學費預算計算":
         m3.metric("津貼需資助額", f"${max(0, subsidy):,.0f}")
         
         st.info(f"💡 公式說明：(${total_cost:,.0f} 總成本) / ({total_students} 總人數) = ${avg_cost:.1f} (平均每人成本)")
+        if subsidy > 0:
+            st.success(f"每位同學獲得資助：${avg_cost - notice_fee:.1f} 元")
     else:
         st.warning("請輸入參加人數以獲取計算結果。")
 
@@ -133,7 +143,7 @@ if menu == "1. 學費預算計算":
 elif menu == "2. 訓練班日程表":
     st.title("📅 訓練班日程管理")
     if st.session_state.is_admin:
-        edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
+        edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True, key="schedule_editor")
         if st.button("更新日程表"):
             st.session_state.schedule_df = edited_df
             st.success("日程表已成功儲存！")
@@ -150,8 +160,7 @@ elif menu == "3. 隊員排行榜":
 # --- 4. 點名與統計 ---
 elif menu == "4. 點名與統計":
     st.title("📝 點名紀錄與出席率統計")
-    st.write("教練點名後，數據將在此自動匯總。")
-    st.data_editor(st.session_state.players_df[["姓名", "年級", "班級", "出席率"]], use_container_width=True)
+    st.data_editor(st.session_state.players_df[["姓名", "年級", "班級", "出席率"]], use_container_width=True, key="attendance_viewer")
     st.button("導出點名月報 (Excel)")
 
 # --- 5. 比賽活動公告 ---
@@ -160,25 +169,41 @@ elif menu == "5. 比賽活動公告":
     
     if st.session_state.is_admin:
         with st.expander("➕ 新增活動通知"):
-            with st.form("new_event"):
+            with st.form("new_event_form"):
                 e_name = st.text_input("活動名稱")
                 e_date = st.date_input("活動日期")
                 e_loc = st.text_input("地點")
                 e_type = st.selectbox("類型", ["比賽", "校外活動", "講座"])
                 e_stat = st.selectbox("狀態", ["接受報名", "報名截止", "尚未開始"])
                 if st.form_submit_button("確認發布"):
-                    new_e = {"活動": e_name, "日期": str(e_date), "地點": e_loc, "類型": e_type, "狀態": e_stat}
-                    st.session_state.events_df = pd.concat([st.session_state.events_df, pd.DataFrame([new_e])], ignore_index=True)
-                    st.rerun()
+                    if e_name:
+                        new_data = {
+                            "活動": e_name, 
+                            "日期": str(e_date), 
+                            "地點": e_loc, 
+                            "類型": e_type, 
+                            "狀態": e_stat
+                        }
+                        # 使用 concat 並確保結構正確
+                        st.session_state.events_df = pd.concat([st.session_state.events_df, pd.DataFrame([new_data])], ignore_index=True)
+                        st.success("活動已發布！")
+                        st.rerun()
+                    else:
+                        st.error("請輸入活動名稱")
 
-    # 以卡片形式展示
     st.markdown("---")
-    cols = st.columns(2)
-    for idx, row in st.session_state.events_df.iterrows():
-        with cols[idx % 2]:
-            with st.container(border=True):
-                st.subheader(row['活動'])
-                st.write(f"📅 日期: {row['日期']} | 📍 地點: {row['地點']}")
-                st.write(f"🏷️ 類型: {row['類型']} | 📌 狀態: **{row['狀態']}**")
-                if row['狀態'] == "接受報名":
-                    st.button(f"🔗 點我查看報名連結 ({idx})", key=f"link_{idx}")
+    # 修正 KeyError 的關鍵：顯示前再次檢查欄位是否存在
+    df = st.session_state.events_df
+    if not df.empty and "活動" in df.columns:
+        cols = st.columns(2)
+        for idx, row in df.iterrows():
+            with cols[idx % 2]:
+                with st.container(border=True):
+                    # 使用 get 方法防止報錯
+                    st.subheader(row.get('活動', '未命名活動'))
+                    st.write(f"📅 日期: {row.get('日期', '-')} | 📍 地點: {row.get('地點', '-')}")
+                    st.write(f"🏷️ 類型: {row.get('類型', '-')} | 📌 狀態: **{row.get('狀態', '-')}**")
+                    if row.get('狀態') == "接受報名":
+                        st.button(f"🔗 查看報名連結", key=f"btn_ev_{idx}")
+    else:
+        st.info("目前沒有進行中的活動。")
