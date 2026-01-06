@@ -132,7 +132,25 @@ if menu == "📢 比賽活動公告":
 elif menu == "📅 訓練班日程表":
     st.title("📅 2025-26 年度訓練班日程")
     if st.session_state.is_admin:
-        st.info("💡 修改「具體日期」後請點擊「💾 儲存日程」。各日期請以逗號分隔。")
+        st.info("💡 你可以直接編輯表格，或上傳 Excel/CSV 檔案來覆蓋現有日程。")
+        
+        # Excel 匯入功能
+        uploaded_file = st.file_uploader("匯入日程表 (Excel 或 CSV)", type=["xlsx", "csv"])
+        if uploaded_file:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    new_sched = pd.read_csv(uploaded_file)
+                else:
+                    new_sched = pd.read_excel(uploaded_file)
+                
+                if st.button("✅ 確認匯入並覆蓋日程"):
+                    st.session_state.schedule_df = new_sched
+                    st.success("日程表已成功匯入！")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"匯入失敗：{e}")
+
+        st.divider()
         edited_schedule = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True, key="sched_editor")
         c1, c2 = st.columns([1, 5])
         with c1:
@@ -157,9 +175,26 @@ elif menu == "🏆 隊員排行榜":
     
     if st.session_state.is_admin:
         st.divider()
-        st.subheader("✍️ 快速編輯積分")
+        st.subheader("✍️ 管理隊員名單")
+        
+        # Excel 匯入功能
+        uploaded_players = st.file_uploader("匯入隊員名單 (Excel 或 CSV)", type=["xlsx", "csv"], key="player_upload")
+        if uploaded_players:
+            try:
+                if uploaded_players.name.endswith('.csv'):
+                    new_p = pd.read_csv(uploaded_players)
+                else:
+                    new_p = pd.read_excel(uploaded_players)
+                
+                if st.button("✅ 確認匯入隊員名單"):
+                    st.session_state.players_df = new_p
+                    st.success("隊員名單已成功匯入！")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"匯入失敗：{e}")
+
         new_players = st.data_editor(st.session_state.players_df, num_rows="dynamic", use_container_width=True, key="player_editor")
-        if st.button("💾 儲存積分"):
+        if st.button("💾 儲存編輯結果"):
             st.session_state.players_df = new_players
             st.success("更新成功")
             st.rerun()
@@ -201,10 +236,12 @@ elif menu == "📝 點名與統計":
 # --- 5. 學費預算計算 ---
 elif menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 下期預算核算工具")
+    st.info("💡 已更新預設單班成本：校隊 $2,750 / 培訓 $1,350 / 興趣 $1,200")
+    
     c1, c2, c3 = st.columns(3)
-    cost_team = c1.number_input("校隊班 總成本 (單班)", 30250)
-    cost_train = c2.number_input("培訓班 總成本 (單班)", 13500)
-    cost_hobby = c3.number_input("興趣班 總成本 (單班)", 9600)
+    cost_team = c1.number_input("校隊班 總成本 (單班)", 2750)
+    cost_train = c2.number_input("培訓班 總成本 (單班)", 1350)
+    cost_hobby = c3.number_input("興趣班 總成本 (單班)", 1200)
     st.divider()
     col1, col2, col3 = st.columns(3)
     with col1:
