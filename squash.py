@@ -147,7 +147,7 @@ elif menu == "📅 訓練班日程表":
     else:
         st.table(st.session_state.schedule_df)
 
-# --- 3. 隊員排行榜 (新增 Excel 匯入功能) ---
+# --- 3. 隊員排行榜 ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 壁球隊 TOP 隊員排行榜")
     
@@ -176,24 +176,61 @@ elif menu == "🏆 隊員排行榜":
     top_players.index += 1
     st.table(top_players)
 
-# --- 4. 點名與統計 ---
+# --- 4. 點名與統計 (新增匯入功能) ---
 elif menu == "📝 點名與統計":
     st.title("📝 點名紀錄與出席率統計")
     display_cols = ["姓名", "年級", "班級", "出席率"]
     
     if st.session_state.is_admin:
-        st.write("🔧 管理員模式：可直接更新學員出席狀態")
+        with st.expander("📥 管理員功能：匯入點名/出席率 Excel"):
+            st.write("上傳 Excel 以快速更新出席率：`姓名`, `年級`, `班級`, `出席率`")
+            attendance_file = st.file_uploader("選擇出席紀錄 Excel", type=["xlsx", "xls"], key="uploader_attendance")
+            
+            if attendance_file is not None:
+                try:
+                    df_att_import = pd.read_excel(attendance_file)
+                    # 檢查基本欄位
+                    att_required = ["姓名", "年級", "班級", "出席率"]
+                    if all(col in df_att_import.columns for col in att_required):
+                        if st.button("確認同步出席資料"):
+                            # 將匯入的資料轉換為字典，以便比對更新或新增
+                            for _, row in df_att_import.iterrows():
+                                # 檢查隊員是否已存在 (以姓名為 Key)
+                                mask = st.session_state.players_df['姓名'] == row['姓名']
+                                if mask.any():
+                                    # 更新現有隊員的出席率與年級/班級
+                                    for col in ["年級", "班級", "出席率"]:
+                                        st.session_state.players_df.loc[mask, col] = row[col]
+                                else:
+                                    # 如果不存在，則新增隊員 (積分預設為 0)
+                                    new_player = {
+                                        "姓名": row['姓名'],
+                                        "年級": row['年級'],
+                                        "班級": row['班級'],
+                                        "出席率": row['出席率'],
+                                        "積分": 0
+                                    }
+                                    st.session_state.players_df = pd.concat([st.session_state.players_df, pd.DataFrame([new_player])], ignore_index=True)
+                            st.success("出席紀錄同步完成！")
+                            st.rerun()
+                    else:
+                        st.error("Excel 格式不正確，需包含：姓名, 年級, 班級, 出席率")
+                except Exception as e:
+                    st.error(f"匯入錯誤: {e}")
+
+        st.markdown("---")
+        st.write("🔧 管理員模式：可直接在下方表格手動更新")
         edited_players_subset = st.data_editor(
             st.session_state.players_df[display_cols], 
             use_container_width=True, 
             key="attendance_editor",
             num_rows="dynamic"
         )
-        if st.button("儲存點名變更"):
-            # 更新對應欄位
+        if st.button("儲存手動變更"):
+            # 確保對應回原始資料
             for col in display_cols:
                 st.session_state.players_df[col] = edited_players_subset[col].values
-            st.success("出席紀錄已更新！")
+            st.success("手動修改已儲存！")
     else:
         st.dataframe(st.session_state.players_df[display_cols], use_container_width=True)
     
