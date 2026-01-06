@@ -77,18 +77,12 @@ if menu == "📢 比賽活動公告":
                 new_title = st.text_input("活動名稱")
                 new_date = st.date_input("活動日期")
                 new_loc = st.text_input("地點")
-                new_pdf = st.text_input("報名表 PDF 連結 (可選)")
+                new_pdf = st.text_input("報名表 PDF 連結 (例如 https://...)")
                 submitted = st.form_submit_button("立即發布")
                 if submitted and new_title:
-                    # 計算 ID，預防空列表
-                    max_id = 0
-                    if st.session_state.events_list:
-                        max_id = max(e["id"] for e in st.session_state.events_list)
-                    
-                    new_id = int(max_id + 1)
-                    
+                    max_id = max([e["id"] for e in st.session_state.events_list]) if st.session_state.events_list else 0
                     st.session_state.events_list.append({
-                        "id": new_id, 
+                        "id": int(max_id + 1), 
                         "活動": str(new_title), 
                         "日期": str(new_date),
                         "地點": str(new_loc), 
@@ -102,7 +96,6 @@ if menu == "📢 比賽活動公告":
     if not st.session_state.events_list:
         st.write("目前沒有進行中的活動。")
     else:
-        # 使用副本遍歷以避免刪除索引錯誤
         for idx, ev in enumerate(list(st.session_state.events_list)):
             with st.container(border=True):
                 col1, col2 = st.columns([3, 1])
@@ -118,16 +111,19 @@ if menu == "📢 比賽活動公告":
                         st.toast("已記錄你的興趣！")
                         st.rerun()
                     
-                    # 徹底修復 TypeError: 確保 pdf_url 絕對是合法的非空字串
+                    # --- 終極防護機制 ---
                     raw_url = ev.get("pdf_url", "")
-                    # 過濾掉可能是 None 或 NaN 的值
-                    clean_url = str(raw_url).strip() if (raw_url and not pd.isna(raw_url)) else ""
+                    # 確保它是字串且長度大於 12 (基本 http://a.bc 的長度)
+                    is_valid_url = isinstance(raw_url, str) and raw_url.lower().startswith(("http://", "https://")) and len(raw_url) > 10
                     
-                    # 只有網址格式正確才顯示 link_button
-                    if clean_url.lower().startswith("http"):
-                        st.link_button("📄 下載報名表", clean_url, key=f"pdf_link_{e_id}_{idx}")
+                    if is_valid_url:
+                        # 使用 try-except 包裹組件，防止 Streamlit 內部對特定字元的校驗報錯
+                        try:
+                            st.link_button("📄 下載報名表", raw_url, key=f"lnk_{e_id}_{idx}")
+                        except Exception:
+                            st.button("📄 連結格式錯誤", disabled=True, key=f"err_{e_id}_{idx}")
                     else:
-                        st.button("📄 無報名表", disabled=True, key=f"pdf_no_link_{e_id}_{idx}", help="尚未提供有效下載連結")
+                        st.button("📄 無報名表", disabled=True, key=f"none_{e_id}_{idx}", help="管理員未提供有效連結")
                     
                     if st.session_state.is_admin:
                         if st.button("🗑️ 刪除活動", key=f"del_btn_{e_id}", type="primary"):
@@ -140,16 +136,10 @@ elif menu == "📅 訓練班日程表":
     if st.session_state.is_admin:
         st.info("💡 修改「具體日期」後請點擊「💾 儲存日程」。")
         edited_schedule = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True, key="sched_editor")
-        c_btn1, c_btn2 = st.columns([1, 4])
-        with c_btn1:
-            if st.button("💾 儲存日程"):
-                st.session_state.schedule_df = edited_schedule
-                st.success("數據已儲存！")
-                st.rerun()
-        with c_btn2:
-            if st.button("🔄 重置為預設數據"):
-                st.session_state.schedule_df = pd.DataFrame(default_schedule)
-                st.rerun()
+        if st.button("💾 儲存日程"):
+            st.session_state.schedule_df = edited_schedule
+            st.success("數據已儲存！")
+            st.rerun()
     else:
         st.dataframe(st.session_state.schedule_df.drop(columns=["具體日期"]), use_container_width=True)
 
@@ -159,36 +149,14 @@ elif menu == "🏆 隊員排行榜":
     if not st.session_state.players_df.empty:
         rank_df = st.session_state.players_df.sort_values("積分", ascending=False).reset_index(drop=True)
         rank_df.index += 1
-        rank_df.index.name = "排名"
         st.table(rank_df[["姓名", "積分"]])
-    else:
-        st.write("目前尚無資料，管理員可匯入資料。")
-
+    
     if st.session_state.is_admin:
         st.divider()
-        st.subheader("⚙️ 積分管理 (管理員專用)")
-        tab1, tab2 = st.tabs(["📥 匯入 Excel/CSV", "✍️ 手動編輯"])
-        with tab1:
-            uploaded_file = st.file_uploader("選擇檔案 (需含「姓名」與「積分」欄位)", type=["xlsx", "csv"])
-            if uploaded_file:
-                try:
-                    df_import = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-                    df_import.columns = [c.strip() for c in df_import.columns]
-                    if "姓名" in df_import.columns and "積分" in df_import.columns:
-                        if st.button("🚀 確認匯入資料"):
-                            st.session_state.players_df = df_import[["姓名", "積分"]].copy()
-                            st.success("匯入成功！")
-                            st.rerun()
-                    else:
-                        st.error("檔案格式不符：請確保包含「姓名」及「積分」欄位。")
-                except Exception as e:
-                    st.error(f"檔案解析失敗: {e}")
-        with tab2:
-            new_players = st.data_editor(st.session_state.players_df, num_rows="dynamic", use_container_width=True, key="player_editor")
-            if st.button("💾 儲存手動編輯"):
-                st.session_state.players_df = new_players
-                st.success("更新成功")
-                st.rerun()
+        new_players = st.data_editor(st.session_state.players_df, num_rows="dynamic", use_container_width=True)
+        if st.button("💾 儲存積分"):
+            st.session_state.players_df = new_players
+            st.success("更新成功")
 
 # --- 4. 點名與統計 ---
 elif menu == "📝 點名與統計":
@@ -206,58 +174,35 @@ elif menu == "📝 點名與統計":
         for i in range(1, num_lessons + 1):
             if f"T{i}" not in att_df.columns: att_df[f"T{i}"] = False
         
-        display_cols = ["姓名", "年級"]
-        present_cols = [c for c in display_cols if c in att_df.columns]
-        final_display_df = att_df[present_cols + [f"T{i}" for i in range(1, num_lessons + 1)]].rename(columns=col_map)
-        
         if st.session_state.is_admin:
-            edited_att = st.data_editor(final_display_df, column_config={v: st.column_config.CheckboxColumn() for v in col_map.values()}, use_container_width=True, num_rows="dynamic", key=f"att_editor_{sel_class}")
-            if st.button("💾 儲存點名紀錄"):
-                rev_map = {v: k for k, v in col_map.items()}
-                to_save = edited_att.rename(columns=rev_map)
-                to_save["班級"] = sel_class
-                st.session_state.attendance_data = st.session_state.attendance_data[st.session_state.attendance_data["班級"] != sel_class]
-                st.session_state.attendance_data = pd.concat([st.session_state.attendance_data, to_save], ignore_index=True).fillna(False)
-                st.success("點名資料已更新")
+            edited_att = st.data_editor(att_df, use_container_width=True, num_rows="dynamic")
+            if st.button("💾 儲存點名"):
+                st.session_state.attendance_data = pd.concat([st.session_state.attendance_data[st.session_state.attendance_data["班級"] != sel_class], edited_att])
+                st.success("已儲存")
         else:
-            st.dataframe(final_display_df, use_container_width=True)
-    else:
-        st.warning("請先在日程表建立班級。")
+            st.dataframe(att_df, use_container_width=True)
 
 # --- 5. 學費預算計算 ---
 elif menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 下期預算核算工具")
-    st.info("此工具用於快速估算開班成本。總支出計算公式為：班級數量 × 該類別總成本。")
-    
     c1, c2, c3 = st.columns(3)
-    cost_team = c1.number_input("校隊班 總成本 (每班)", 30250, help="例如: 2750/堂 × 11堂")
-    cost_train = c2.number_input("培訓班 總成本 (每班)", 13500, help="例如: 1350/堂 × 10堂")
-    cost_hobby = c3.number_input("興趣班 總成本 (每班)", 9600, help="例如: 1200/堂 × 8堂")
+    cost_team = c1.number_input("校隊班 總成本 (每班)", 30250)
+    cost_train = c2.number_input("培訓班 總成本 (每班)", 13500)
+    cost_hobby = c3.number_input("興趣班 總成本 (每班)", 9600)
     
-    st.divider()
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.subheader("校隊類別")
-        n_t = st.number_input("開班數量", 1, key="n_t")
-        p_t = st.number_input("預計總人數", 12, key="p_t")
-    with col2:
-        st.subheader("培訓類別")
-        n_tr = st.number_input("開班數量", 4, key="n_tr")
-        p_tr = st.number_input("預計總人數", 48, key="p_tr")
-    with col3:
-        st.subheader("興趣類別")
-        n_h = st.number_input("開班數量", 5, key="n_h")
-        p_h = st.number_input("預計總人數", 75, key="p_h")
+    n_t = col1.number_input("校隊開班數", 1)
+    n_tr = col2.number_input("培訓開班數", 4)
+    n_h = col3.number_input("興趣開班數", 5)
+    
+    fee = st.number_input("每位學生預計收費 ($)", 250)
+    p_total = st.number_input("預計總學生人數", 135)
+    
+    total_cost = (n_t * cost_team) + (n_tr * cost_train) + (n_h * cost_hobby)
+    total_income = p_total * fee
     
     st.divider()
-    fee = st.number_input("每位學生預計收費 ($)", 250)
-    
-    # 計算邏輯
-    total_cost = (n_t * cost_team) + (n_tr * cost_train) + (n_h * cost_hobby)
-    total_income = (p_t + p_tr + p_h) * fee
-    balance = total_income - total_cost
-    
     m1, m2, m3 = st.columns(3)
-    m1.metric("預計教練總支出", f"${total_cost:,}")
-    m2.metric("預計學費總收入", f"${total_income:,}")
-    m3.metric("預計損益差額", f"${balance:,}", delta=f"{balance:,}")
+    m1.metric("總支出預算", f"${total_cost:,}")
+    m2.metric("總收入預算", f"${total_income:,}")
+    m3.metric("損益差額", f"${total_income - total_cost:,}")
