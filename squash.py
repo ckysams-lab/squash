@@ -15,27 +15,29 @@ if 'is_admin' not in st.session_state:
 if 'unit_costs' not in st.session_state:
     st.session_state.unit_costs = {"校隊班": 2750.0, "培訓班": 1350.0, "興趣班": 1200.0}
 
-# 初始化訓練班日程 (已增加星期六 A、B 兩班並補全日期)
+# --- 核心數據：班級日程與日期定義 ---
+default_schedule = [
+    {"班級": "星期二小型壁球興趣班", "地點": "學校室內操場", "時間": "15:30-16:30", "日期": "1/20-3/31", "堂數": 8, "類型": "興趣班", "具體日期": "1/20, 1/27, 2/3, 2/10, 2/17, 2/24, 3/3, 3/10"},
+    {"班級": "星期六小型壁球興趣班 (A班)", "地點": "學校室內操場", "時間": "10:15-11:15", "日期": "2/7-5/23", "堂數": 8, "類型": "興趣班", "具體日期": "2/7, 2/14, 2/21, 2/28, 3/7, 3/14, 3/21, 3/28"},
+    {"班級": "星期六小型壁球興趣班 (B班)", "地點": "學校室內操場", "時間": "12:00-13:00", "日期": "2/7-5/23", "堂數": 8, "類型": "興趣班", "具體日期": "2/7, 2/14, 2/21, 2/28, 3/7, 3/14, 3/21, 3/28"},
+    {"班級": "校隊訓練班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "12/17-4/1", "堂數": 11, "類型": "校隊班", "具體日期": "12/17, 1/7, 1/14, 1/21, 2/4, 2/11, 2/18, 2/25, 3/4, 3/11, 3/18"},
+    {"班級": "精英班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "1/8-3/26", "堂數": 10, "類型": "培訓班", "具體日期": "1/8, 1/15, 1/22, 2/5, 2/12, 2/19, 2/26, 3/5, 3/12, 3/19"},
+    {"班級": "中級訓練班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "1/5-3/30", "堂數": 10, "類型": "培訓班", "具體日期": "1/5, 1/12, 1/19, 2/2, 2/9, 2/16, 2/23, 3/2, 3/9, 3/16"},
+]
+
 if 'schedule_df' not in st.session_state:
-    st.session_state.schedule_df = pd.DataFrame([
-        {"班級": "星期二小型壁球興趣班", "地點": "學校室內操場", "時間": "15:30-16:30", "日期": "1/20-3/31", "堂數": 8, "類型": "興趣班", "具體日期": "1/20, 1/27, 2/3, 2/10, 2/17, 2/24, 3/3, 3/10"},
-        {"班級": "星期六小型壁球興趣班 (A班)", "地點": "學校室內操場", "時間": "10:15-11:15", "日期": "2/7-5/23", "堂數": 8, "類型": "興趣班", "具體日期": "2/7, 2/14, 2/21, 2/28, 3/7, 3/14, 3/21, 3/28"},
-        {"班級": "星期六小型壁球興趣班 (B班)", "地點": "學校室內操場", "時間": "12:00-13:00", "日期": "2/7-5/23", "堂數": 8, "類型": "興趣班", "具體日期": "2/7, 2/14, 2/21, 2/28, 3/7, 3/14, 3/21, 3/28"},
-        {"班級": "校隊訓練班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "12/17-4/1", "堂數": 11, "類型": "校隊班", "具體日期": "12/17, 1/7, 1/14, 1/21, 2/4, 2/11, 2/18, 2/25, 3/4, 3/11, 3/18"},
-        {"班級": "精英班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "1/8-3/26", "堂數": 10, "類型": "培訓班", "具體日期": ""},
-        {"班級": "中級訓練班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "1/5-3/30", "堂數": 10, "類型": "培訓班", "具體日期": ""},
-    ])
+    st.session_state.schedule_df = pd.DataFrame(default_schedule)
 
-# 初始化點名資料
+# 初始化點名紀錄
 if 'attendance_data' not in st.session_state:
-    initial_data = [
-        {"姓名": "陳大文", "班級": "校隊訓練班", "年級": "5C", "T1": True, "T2": True, "T3": False},
-        {"姓名": "李小明", "班級": "校隊訓練班", "年級": "6A", "T1": True, "T2": False, "T3": True},
-        {"姓名": "張一龍", "班級": "精英班", "年級": "4B", "T1": True, "T2": True, "T3": True},
+    # 預設一些假數據供測試
+    initial_att = [
+        {"姓名": "陳大文", "班級": "校隊訓練班", "年級": "5C", "T1": True, "T2": True},
+        {"姓名": "李小明", "班級": "校隊訓練班", "年級": "6A", "T1": True, "T2": False}
     ]
-    st.session_state.attendance_data = pd.DataFrame(initial_data)
+    st.session_state.attendance_data = pd.DataFrame(initial_att)
 
-# 初始化基本隊員名單
+# 初始化隊員清單
 if 'players_df' not in st.session_state:
     st.session_state.players_df = pd.DataFrame([
         {"姓名": "陳大文", "積分": 98},
@@ -45,26 +47,21 @@ if 'players_df' not in st.session_state:
         {"姓名": "趙子龍", "積分": 88},
     ])
 
-if 'events_df' not in st.session_state:
-    st.session_state.events_df = pd.DataFrame([
-        {"活動": "全港小學校際壁球比賽", "日期": "2026-03-15", "地點": "歌和老街壁球中心", "類型": "比賽", "狀態": "接受報名"},
-        {"活動": "壁球同樂日", "日期": "2026-04-10", "地點": "香港壁球中心", "類型": "校外活動", "狀態": "尚未開始"}
-    ])
-
+# 密碼檢查函數
 def check_password():
     if st.session_state.get("pwd_input") == ADMIN_PASSWORD:
         st.session_state.is_admin = True
-        st.success("管理員解鎖成功！")
+        st.success("管理員權限已解鎖！")
     else:
-        st.error("密碼錯誤。")
+        st.error("密碼不正確。")
 
-# --- 側邊欄 ---
-st.sidebar.title("🔐 管理員區域")
+# --- 側邊欄導覽 ---
+st.sidebar.title("🏸 正覺壁球管理系統")
 if not st.session_state.is_admin:
-    st.sidebar.text_input("輸入管理員密碼", type="password", key="pwd_input", on_change=check_password)
+    st.sidebar.text_input("輸入管理員密碼 (8888)", type="password", key="pwd_input", on_change=check_password)
 else:
-    st.sidebar.success("✅ 已取得管理權限")
-    if st.sidebar.button("登出管理員"):
+    st.sidebar.success("✅ 管理員模式")
+    if st.sidebar.button("登出"):
         st.session_state.is_admin = False
         st.rerun()
 
@@ -72,190 +69,163 @@ menu_options = ["📢 比賽活動公告", "📅 訓練班日程表", "🏆 隊�
 if st.session_state.is_admin:
     menu_options.append("💰 學費預算計算 (管理專用)")
 
-menu = st.sidebar.radio("功能選單", menu_options)
+menu = st.sidebar.radio("導覽選單", menu_options)
 
 # --- 1. 比賽活動公告 ---
 if menu == "📢 比賽活動公告":
-    st.title("📅 壁球活動公告與報名日曆")
-    if st.session_state.is_admin:
-        with st.expander("➕ 發布新活動"):
-            with st.form("new_event"):
-                e_name = st.text_input("活動名稱")
-                e_date = st.date_input("日期")
-                if st.form_submit_button("發布"):
-                    new_ev = {"活動": e_name, "日期": str(e_date), "地點": "", "類型": "比賽", "狀態": "接受報名"}
-                    st.session_state.events_df = pd.concat([st.session_state.events_df, pd.DataFrame([new_ev])], ignore_index=True)
-                    st.rerun()
-
-    cols = st.columns(2)
-    for idx, row in st.session_state.events_df.iterrows():
-        with cols[idx % 2]:
-            st.info(f"**{row['活動']}**\n\n日期: {row['日期']} | 狀態: {row['狀態']}")
+    st.title("📅 最新壁球活動公告")
+    events = [
+        {"活動": "全港小學校際壁球比賽", "日期": "2026-03-15", "地點": "歌和老街", "狀態": "接受報名"},
+        {"活動": "校際壁球個人賽", "日期": "2026-04-10", "地點": "香港壁球中心", "狀態": "尚未開始"}
+    ]
+    cols = st.columns(len(events))
+    for i, ev in enumerate(events):
+        with cols[i]:
+            st.info(f"### {ev['活動']}\n\n**日期**: {ev['日期']}\n\n**地點**: {ev['地點']}\n\n**狀態**: {ev['狀態']}")
 
 # --- 2. 訓練班日程表 ---
 elif menu == "📅 訓練班日程表":
-    st.title("📅 訓練班日程閱覽")
+    st.title("📅 2025-26 年度訓練班日程")
     if st.session_state.is_admin:
-        st.warning("⚠️ 重要：請在「具體日期」欄位輸入以逗號隔開的日期（例如：1/20, 1/27），系統會自動將這些日期對接到「點名頁面」的欄位名稱。")
-        edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
-        if st.button("確認儲存日程"):
-            st.session_state.schedule_df = edited_df
-            st.success("已更新日程表並連結至點名系統")
+        st.info("💡 **操作提示**：\n1. 在下方的「具體日期」欄位填入上課日（如：1/20, 1/27）。\n2. 點名頁面的欄位標題會隨之自動更新。\n3. 修改後請務必點擊「💾 儲存日程」。")
+        
+        edited_schedule = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True, key="sched_editor")
+        
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("💾 儲存日程"):
+                st.session_state.schedule_df = edited_schedule
+                st.success("數據已儲存！")
+                st.rerun()
+        with c2:
+            if st.button("🔄 重置為預設數據"):
+                st.session_state.schedule_df = pd.DataFrame(default_schedule)
+                st.rerun()
     else:
-        # 非管理員隱藏編輯用的具體日期欄位
-        display_cols = [c for c in st.session_state.schedule_df.columns if c != "具體日期"]
-        st.table(st.session_state.schedule_df[display_cols])
+        st.dataframe(st.session_state.schedule_df.drop(columns=["具體日期"]), use_container_width=True)
 
 # --- 3. 隊員排行榜 ---
 elif menu == "🏆 隊員排行榜":
-    st.title("🏆 壁球隊 TOP 隊員排行榜")
-    if st.session_state.is_admin:
-        with st.expander("📥 匯入積分 Excel"):
-            up_file = st.file_uploader("上傳 (需包含: 姓名, 積分)", type=["xlsx"])
-            if up_file:
-                df_up = pd.read_excel(up_file)
-                if st.button("覆蓋積分"):
-                    st.session_state.players_df = df_up[["姓名", "積分"]]
-                    st.rerun()
-    
+    st.title("🏆 壁球隊員積分排行榜")
     rank_df = st.session_state.players_df.sort_values("積分", ascending=False).reset_index(drop=True)
     rank_df.index += 1
     st.table(rank_df)
-
-# --- 4. 點名與統計 ---
-elif menu == "📝 點名與統計":
-    st.title("📝 班級點名紀錄表")
-    
-    all_classes = st.session_state.schedule_df["班級"].tolist()
-    if not all_classes:
-        st.warning("請先在日程表新增班級")
-    else:
-        selected_class = st.selectbox("請選擇班級查看點名表", all_classes)
-        
-        # 獲取日程表中該班級的所有資訊
-        class_info = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == selected_class].iloc[0]
-        total_lessons = int(class_info["堂數"])
-        
-        # 從日程表中讀取「具體日期」
-        raw_dates = str(class_info.get("具體日期", ""))
-        date_list = [d.strip() for d in raw_dates.split(",") if d.strip()]
-        
-        # 建立欄位名稱映射
-        rename_map = {}
-        for i in range(1, total_lessons + 1):
-            if i <= len(date_list):
-                rename_map[f"T{i}"] = date_list[i-1]
-            else:
-                rename_map[f"T{i}"] = f"第{i}堂"
-        
-        # 獲取隊員數據
-        df_class_att = st.session_state.attendance_data[st.session_state.attendance_data["班級"] == selected_class].copy()
-        
-        # 確保內部數據結構 T1...Tn 齊全
-        for i in range(1, total_lessons + 1):
-            col_id = f"T{i}"
-            if col_id not in df_class_att.columns:
-                df_class_att[col_id] = False
-                
-        # 準備顯示用的 DataFrame
-        lesson_ids = [f"T{i}" for i in range(1, total_lessons + 1)]
-        display_df = df_class_att[["姓名", "年級"] + lesson_ids]
-        display_df = display_df.rename(columns=rename_map)
-
-        st.subheader(f"📊 {selected_class}")
-        if date_list:
-            st.success(f"🔗 已成功從日程表連結 {len(date_list)} 個上課日期")
-        else:
-            st.info("💡 提示：若要在表格標題顯示日期，請在「訓練班日程表」的「具體日期」欄位輸入日期。")
-        
-        if st.session_state.is_admin:
-            with st.expander("📥 匯入本班名單"):
-                att_file = st.file_uploader("上傳 Excel (需包含: 姓名, 年級)", type=["xlsx"])
-                if att_file:
-                    df_new = pd.read_excel(att_file)
-                    if st.button("確認新增至此班級"):
-                        for _, r in df_new.iterrows():
-                            if not ((st.session_state.attendance_data["姓名"] == r["姓名"]) & 
-                                    (st.session_state.attendance_data["班級"] == selected_class)).any():
-                                new_row = {"姓名": r["姓名"], "年級": r["年級"], "班級": selected_class}
-                                st.session_state.attendance_data = pd.concat([st.session_state.attendance_data, pd.DataFrame([new_row])], ignore_index=True)
-                        st.rerun()
-
-            # 點名編輯器
-            edited_class_df = st.data_editor(
-                display_df,
-                column_config={val: st.column_config.CheckboxColumn(default=False) for val in rename_map.values()},
-                use_container_width=True,
-                num_rows="dynamic",
-                key=f"editor_{selected_class}"
-            )
-            
-            if st.button("💾 儲存點名變更"):
-                reverse_map = {v: k for k, v in rename_map.items()}
-                save_df = edited_class_df.rename(columns=reverse_map)
-                
-                st.session_state.attendance_data = st.session_state.attendance_data[st.session_state.attendance_data["班級"] != selected_class]
-                save_df["班級"] = selected_class
-                st.session_state.attendance_data = pd.concat([st.session_state.attendance_data, save_df], ignore_index=True).fillna(False)
-                st.success("點名紀錄已成功儲存！")
+    if st.session_state.is_admin:
+        with st.expander("編輯積分"):
+            new_rank_df = st.data_editor(st.session_state.players_df, use_container_width=True)
+            if st.button("儲存積分修改"):
+                st.session_state.players_df = new_rank_df
                 st.rerun()
-        else:
-            # 唯讀模式
-            att_only = display_df[list(rename_map.values())]
-            display_df["出席率"] = (att_only.sum(axis=1) / total_lessons * 100).round(1).astype(str) + "%"
-            st.dataframe(display_df, use_container_width=True)
 
-    st.divider()
-    st.download_button("📥 導出全校出席報表 (CSV)", data=st.session_state.attendance_data.to_csv().encode('utf-8'), file_name="attendance.csv")
+# --- 4. 點名與統計 (日期對接關鍵區) ---
+elif menu == "📝 點名與統計":
+    st.title("📝 班級點名紀錄")
+    
+    class_list = st.session_state.schedule_df["班級"].tolist()
+    sel_class = st.selectbox("請選擇班級：", class_list)
+    
+    # 獲取該班級的日程資料
+    row = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == sel_class].iloc[0]
+    num_lessons = int(row["堂數"])
+    
+    # 解析具體日期
+    dates_str = str(row.get("具體日期", ""))
+    date_items = [d.strip() for d in dates_str.split(",") if d.strip()]
+    
+    # 建立欄位顯示映射 (T1 -> 實體日期)
+    col_map = {}
+    for i in range(1, num_lessons + 1):
+        display_name = date_items[i-1] if i <= len(date_items) else f"第{i}堂"
+        col_map[f"T{i}"] = display_name
+        
+    # 過濾點名數據
+    att_df = st.session_state.attendance_data[st.session_state.attendance_data["班級"] == sel_class].copy()
+    
+    # 確保所有需要的 T 欄位都存在於 DataFrame
+    for i in range(1, num_lessons + 1):
+        if f"T{i}" not in att_df.columns:
+            att_df[f"T{i}"] = False
+            
+    # 準備展示用數據
+    display_cols = ["姓名", "年級"] + [f"T{i}" for i in range(1, num_lessons + 1)]
+    final_display_df = att_df[display_cols].rename(columns=col_map)
+    
+    st.subheader(f"📊 {sel_class} 點名表")
+    if date_items:
+        st.success(f"✅ 日期已同步：{len(date_items)} 堂課")
+    else:
+        st.warning("⚠️ 此班級尚未定義具體日期，顯示為預設堂數標題。")
+
+    if st.session_state.is_admin:
+        # 管理員可編輯
+        edited_att = st.data_editor(
+            final_display_df,
+            column_config={v: st.column_config.CheckboxColumn() for v in col_map.values()},
+            use_container_width=True,
+            num_rows="dynamic",
+            key=f"att_edit_{sel_class}"
+        )
+        
+        if st.button("💾 儲存點名結果"):
+            # 轉換回原始 T1... 標籤並存回 session_state
+            rev_map = {v: k for k, v in col_map.items()}
+            to_save = edited_att.rename(columns=rev_map)
+            to_save["班級"] = sel_class
+            
+            # 更新全局數據：先刪除舊的，再加入新的
+            st.session_state.attendance_data = st.session_state.attendance_data[st.session_state.attendance_data["班級"] != sel_class]
+            st.session_state.attendance_data = pd.concat([st.session_state.attendance_data, to_save], ignore_index=True).fillna(False)
+            st.success("點名紀錄已更新！")
+    else:
+        # 普通用戶僅查看
+        st.dataframe(final_display_df, use_container_width=True)
 
 # --- 5. 學費預算計算 ---
 elif menu == "💰 學費預算計算 (管理專用)":
-    st.title("💰 下一期通告學費核算 (管理員手動試算)")
+    st.title("💰 下期預算核算工具")
     
-    st.subheader("⚙️ 第一步：成本單價設定 (每堂課)")
+    st.markdown("### 1. 基礎成本設定 (每堂)")
     c1, c2, c3 = st.columns(3)
-    with c1:
-        u_team = st.number_input("校隊班 單價 ($)", value=2750.0)
-    with c2:
-        u_train = st.number_input("培訓班 單價 ($)", value=1350.0)
-    with c3:
-        u_hobby = st.number_input("興趣班 單價 ($)", value=1200.0)
-
-    st.divider()
-    st.subheader("👥 第二步：手動輸入班數與參加人數")
-    col_in1, col_in2, col_in3 = st.columns(3)
-    with col_in1:
-        st.markdown("**校隊系列**")
-        n_team = st.number_input("預計開辦班數", min_value=0, value=1, key="n_t")
-        l_team = st.number_input("每班堂數", min_value=0, value=11, key="l_t")
-        s_team = st.number_input("預計參加人數", min_value=0, value=12, key="s_t")
-    with col_in2:
-        st.markdown("**培訓系列**")
-        n_train = st.number_input("預計開辦班數 ", min_value=0, value=4, key="n_tr")
-        l_train = st.number_input("每班堂數 ", min_value=0, value=10, key="l_tr")
-        s_train = st.number_input("預計參加人數 ", min_value=0, value=48, key="s_tr")
-    with col_in3:
-        st.markdown("**興趣班系列**")
-        n_hobby = st.number_input("預計開辦班數  ", min_value=0, value=3, key="n_h") # 已改為3 (二+六A+六B)
-        l_hobby = st.number_input("每班堂數  ", min_value=0, value=8, key="l_h")
-        s_hobby = st.number_input("預計參加人數  ", min_value=0, value=48, key="s_h")
-
-    st.divider()
-    st.subheader("📊 第三步：核算結果")
-    notice_fee = st.number_input("通告擬定每位學生收費 ($)", value=250.0)
+    cost_team = c1.number_input("校隊班 單價 ($)", value=2750)
+    cost_train = c2.number_input("培訓班 單價 ($)", value=1350)
+    cost_hobby = c3.number_input("興趣班 單價 ($)", value=1200)
     
-    total_cost = (n_team * l_team * u_team) + (n_train * l_train * u_train) + (n_hobby * l_hobby * u_hobby)
-    total_students = s_team + s_train + s_hobby
-    total_income = total_students * notice_fee
-    subsidy_needed = total_cost - total_income
+    st.divider()
     
-    if total_students > 0:
-        avg_cost = total_cost / total_students
-        m1, m2, m3 = st.columns(3)
-        m1.metric("總預算開支", f"${total_cost:,.0f}")
-        m2.metric("每人平均真實成本", f"${avg_cost:.1f}")
-        m3.metric("預計資助/虧損額", f"${max(0, subsidy_needed):,.0f}", delta=f"{subsidy_needed:,.0f}", delta_color="inverse")
+    st.markdown("### 2. 班級規模與人數預計")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write("**校隊**")
+        n_team = st.number_input("開班數", value=1, key="nt")
+        l_team = st.number_input("堂數", value=11, key="lt")
+        p_team = st.number_input("預計人數", value=12, key="pt")
+    with col2:
+        st.write("**培訓**")
+        n_train = st.number_input("開班數 ", value=4, key="ntr")
+        l_train = st.number_input("堂數 ", value=10, key="ltr")
+        p_train = st.number_input("預計人數 ", value=48, key="ptr")
+    with col3:
+        st.write("**興趣**")
+        n_hobby = st.number_input("開班數  ", value=3, key="nh")
+        l_hobby = st.number_input("堂數  ", value=8, key="lh")
+        p_hobby = st.number_input("預計人數  ", value=60, key="ph")
         
-        st.info(f"💡 核算公式：(總成本 ${total_cost:,.0f}) / (總人數 {total_students}) = 每人成本 ${avg_cost:.1f}")
+    st.divider()
+    
+    st.markdown("### 3. 計算結果")
+    fee_per_child = st.number_input("預計每位學生收費 ($)", value=250)
+    
+    total_cost = (n_team * l_team * cost_team) + (n_train * l_train * cost_train) + (n_hobby * l_hobby * cost_hobby)
+    total_ppl = p_team + p_train + p_hobby
+    total_income = total_ppl * fee_per_child
+    balance = total_income - total_cost
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("預計總支出", f"${total_cost:,}")
+    m2.metric("預計總收入", f"${total_income:,}")
+    m3.metric("收支差額", f"${balance:,}", delta=f"{balance:,}")
+    
+    if balance < 0:
+        st.error(f"⚠️ 預計需要校方補貼: ${abs(balance):,}")
     else:
-        st.warning("請在上方輸入參加人數以進行核算。")
+        st.success(f"✅ 預計盈餘: ${balance:,}")
