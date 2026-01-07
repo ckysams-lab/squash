@@ -87,6 +87,8 @@ def save_cloud_data(collection_name, df):
                     doc_id = f"{row.get('班級', 'Unknown')}_{row.get('日期', 'Unknown')}".replace("/", "-")
                 elif collection_name == 'announcements':
                     doc_id = f"{row.get('日期')}_{row.get('標題')}"
+                elif collection_name == 'tournaments':
+                    doc_id = f"tm_{row.get('比賽名稱')}_{row.get('日期')}"
                 elif '姓名' in row and '班級' in row:
                     doc_id = f"{row.get('班級')}_{row.get('姓名')}"
                 else:
@@ -122,6 +124,8 @@ if 'attendance_records' not in st.session_state or force_refresh:
     st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單"]))
 if 'announcements_df' not in st.session_state or force_refresh:
     st.session_state.announcements_df = load_cloud_data('announcements', pd.DataFrame(columns=["標題", "內容", "日期"]))
+if 'tournaments_df' not in st.session_state or force_refresh:
+    st.session_state.tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
 
 # --- 側邊欄導航 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
@@ -134,8 +138,7 @@ else:
         st.rerun()
 
 # 定義選單選項
-menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告"]
-# 只有管理員可以看到學費預算
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
     menu_options.append("💰 學費預算計算")
 
@@ -284,7 +287,67 @@ elif menu == "📢 活動公告":
     else:
         st.info("目前沒有公告。")
 
-# --- 頁面 5: 學費預算計算 (僅管理員可見) ---
+# --- 頁面 5: 比賽報名與賽程 ---
+elif menu == "🗓️ 比賽報名與賽程":
+    st.title("🗓️ 賽事報名與賽程管理")
+    
+    if st.session_state.is_admin:
+        with st.expander("➕ 新增比賽資訊"):
+            with st.form("new_tournament", clear_on_submit=True):
+                t_name = st.text_input("比賽名稱 (例如: 全港學界壁球賽)")
+                col1, col2 = st.columns(2)
+                t_date = col1.date_input("比賽日期")
+                t_due = col2.date_input("報名截止日期")
+                t_link = st.text_input("報名/籤表連結 (URL)")
+                t_note = st.text_area("備註 (例如: 需穿著校隊體育服)")
+                if st.form_submit_button("發布賽事"):
+                    new_t = pd.DataFrame([{
+                        "比賽名稱": t_name, 
+                        "日期": t_date.strftime("%Y-%m-%d"), 
+                        "截止日期": t_due.strftime("%Y-%m-%d"), 
+                        "連結": t_link, 
+                        "備註": t_note
+                    }])
+                    st.session_state.tournaments_df = pd.concat([st.session_state.tournaments_df, new_t], ignore_index=True)
+                    save_cloud_data('tournaments', st.session_state.tournaments_df)
+                    st.rerun()
+
+    t_df = st.session_state.tournaments_df
+    if not t_df.empty:
+        # 轉換日期以便排序和計算
+        t_df['截止日期_dt'] = pd.to_datetime(t_df['截止日期'])
+        t_df = t_df.sort_values('截止日期_dt', ascending=True)
+        
+        for index, row in t_df.iterrows():
+            today = datetime.now()
+            days_left = (row['截止日期_dt'] - today).days + 1
+            
+            with st.container():
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.markdown(f"### 🏆 {row['比賽名稱']}")
+                    st.markdown(f"**🗓️ 比賽日期:** {row['日期']} | **⚠️ 報名截止:** {row['截止日期']}")
+                    if row['備註']:
+                        st.info(f"📝 備註: {row['備註']}")
+                    if row['連結']:
+                        st.markdown(f"[🔗 點此查看報名詳情或籤表]({row['連結']})")
+                
+                with c2:
+                    if days_left > 0:
+                        st.metric("剩餘天數", f"{days_left} 天")
+                    else:
+                        st.error("已截止")
+                    
+                    if st.session_state.is_admin:
+                        if st.button("🗑️ 刪除", key=f"del_t_{index}"):
+                            st.session_state.tournaments_df = st.session_state.tournaments_df.drop(index)
+                            save_cloud_data('tournaments', st.session_state.tournaments_df)
+                            st.rerun()
+                st.divider()
+    else:
+        st.info("目前沒有賽事資訊。")
+
+# --- 頁面 6: 學費預算計算 (僅管理員可見) ---
 elif menu == "💰 學費預算計算":
     st.title("💰 預算與營運核算")
     st.info("請輸入預計開班數與平均每班人數，系統將自動計算收益。")
