@@ -86,7 +86,6 @@ def save_cloud_data(collection_name, df):
                 if collection_name == 'attendance_records':
                     doc_id = f"{row.get('班級', 'Unknown')}_{row.get('日期', 'Unknown')}".replace("/", "-")
                 elif collection_name == 'announcements':
-                    # 使用時間戳和標題生成 ID，避免重複
                     doc_id = f"{row.get('日期')}_{row.get('標題')}"
                 elif '姓名' in row and '班級' in row:
                     doc_id = f"{row.get('班級')}_{row.get('姓名')}"
@@ -134,7 +133,13 @@ else:
         st.session_state.is_admin = False
         st.rerun()
 
-menu = st.sidebar.radio("功能選單", ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "💰 學費預算計算"])
+# 定義選單選項
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告"]
+# 只有管理員可以看到學費預算
+if st.session_state.is_admin:
+    menu_options.append("💰 學費預算計算")
+
+menu = st.sidebar.radio("功能選單", menu_options)
 
 # --- 頁面 1: 訓練日程表 ---
 if menu == "📅 訓練日程表":
@@ -265,14 +270,12 @@ elif menu == "📢 活動公告":
 
     ann_df = st.session_state.announcements_df
     if not ann_df.empty:
-        # 逆序顯示最新公告
         for index, row in ann_df.iloc[::-1].iterrows():
             with st.chat_message("user"):
                 st.subheader(row.get('標題', '無標題'))
                 st.caption(f"📅 {row.get('日期', '未知')}")
                 st.write(row.get('內容', ''))
                 
-                # 只有管理員可以刪除
                 if st.session_state.is_admin:
                     if st.button(f"🗑️ 刪除公告", key=f"del_{index}"):
                         st.session_state.announcements_df = st.session_state.announcements_df.drop(index)
@@ -281,12 +284,11 @@ elif menu == "📢 活動公告":
     else:
         st.info("目前沒有公告。")
 
-# --- 頁面 5: 學費預算計算 ---
+# --- 頁面 5: 學費預算計算 (僅管理員可見) ---
 elif menu == "💰 學費預算計算":
     st.title("💰 預算與營運核算")
     st.info("請輸入預計開班數與平均每班人數，系統將自動計算收益。")
     
-    # 校隊、培訓、興趣班
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("### 🏆 校隊班")
@@ -310,9 +312,8 @@ elif menu == "💰 學費預算計算":
     
     col_cost1, col_cost2 = st.columns(2)
     with col_cost1:
-        coach_cost_per_class = st.number_input("預估每班教練總成本 ($)", value=2500, help="指該班別全期的教練費用")
+        coach_cost_per_class = st.number_input("預估每班教練總成本 ($)", value=2500)
     
-    # 計算邏輯
     rev_team = n_team * p_team * fee_team
     rev_train = n_train * p_train * fee_train
     rev_hobby = n_hobby * p_hobby * fee_hobby
@@ -322,13 +323,11 @@ elif menu == "💰 學費預算計算":
     total_cost = total_classes * coach_cost_per_class
     profit = total_revenue - total_cost
 
-    # 顯示結果
     m1, m2, m3 = st.columns(3)
     m1.metric("預計總收入", f"${total_revenue:,}")
     m2.metric("預計總教練成本", f"${total_cost:,}")
     m3.metric("預計利潤", f"${profit:,}", delta=float(profit))
 
-    # 詳細表格
     summary_data = {
         "班別": ["校隊班", "培訓班", "興趣班", "總計"],
         "班數": [n_team, n_train, n_hobby, total_classes],
