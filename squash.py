@@ -46,6 +46,20 @@ db = init_firebase()
 app_id = "squash-management-v1"
 
 # --- 2. 身份驗證功能 ---
+def get_admin_password():
+    """從 Firebase 讀取管理員密碼，若失敗則返回預設值 8888"""
+    default_pwd = "8888"
+    if st.session_state.get('db') is not None:
+        try:
+            # 路徑: /artifacts/{appId}/public/data/admin_settings/config
+            doc_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection('admin_settings').document('config')
+            doc = doc_ref.get()
+            if doc.exists:
+                return str(doc.to_dict().get('password', default_pwd))
+        except Exception:
+            pass
+    return default_pwd
+
 def sign_in_with_email(email, password):
     if email and password:
         st.session_state.user_email = email
@@ -127,9 +141,11 @@ if not st.session_state.logged_in:
     login_type = st.sidebar.selectbox("登入方式", ["管理員密碼", "電子郵件"])
     
     if login_type == "管理員密碼":
-        pwd = st.sidebar.text_input("輸入 4 位密碼", type="password")
+        pwd = st.sidebar.text_input("輸入密碼", type="password")
         if st.sidebar.button("登入"):
-            if pwd == "8888":
+            # 改為從 Firebase 獲取密碼
+            admin_pwd = get_admin_password()
+            if pwd == admin_pwd:
                 st.session_state.logged_in = True
                 st.session_state.is_admin = True
                 st.session_state.user_email = "admin@possa.edu.hk"
@@ -345,15 +361,11 @@ elif menu == "💰 學費與預算核算":
     st.divider()
     
     # 計算邏輯
-    # 收入 = 總人數 * 每人學費
     total_revenue = total_students * fee_per_student
-    
-    # 支出 = 開班數 * 每班固定支出
     exp_team = n_team * cost_team_unit
     exp_train = n_train * cost_train_unit
     exp_hobby = n_hobby * cost_hobby_unit
     total_expense = exp_team + exp_train + exp_hobby
-    
     profit = total_revenue - total_expense
 
     m1, m2, m3 = st.columns(3)
@@ -361,7 +373,6 @@ elif menu == "💰 學費與預算核算":
     m2.metric("預計總支出 (開班費)", f"${total_expense:,}")
     m3.metric("預計淨利潤", f"${profit:,}", delta=float(profit))
 
-    # 詳細表格
     summary_data = {
         "項目": ["校隊訓練班 (支出)", "非校隊訓練班 (支出)", "簡易運動班 (支出)", "學生學費 (總收入)"],
         "數量 / 人數": [f"{n_team} 班", f"{n_train} 班", f"{n_hobby} 班", f"{total_students} 人"],
