@@ -320,7 +320,7 @@ elif menu == "🗓️ 比賽報名與賽程":
 
 elif menu == "💰 學費與預算核算":
     st.title("💰 預算與營運核算 (康文署標準)")
-    st.info("請輸入預計開班數與平均每班人數。支出已按標準設定：校隊班 \$2,750 / 非校隊班 \$1,350 / 簡易運動班 \$1,200。")
+    st.info("收入為學生交的學費；支出為學校按開班數需支付的固定費用。")
     
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -347,11 +347,13 @@ elif menu == "💰 學費與預算核算":
     st.divider()
     
     # 計算邏輯
-    rev_team = n_team * p_team * fee_team
-    rev_train = n_train * p_train * fee_train
-    rev_hobby = n_hobby * p_hobby * fee_hobby
+    # 收入 = 總人數 * 每人學費
+    rev_team = (n_team * p_team) * fee_team
+    rev_train = (n_train * p_train) * fee_train
+    rev_hobby = (n_hobby * p_hobby) * fee_hobby
     total_revenue = rev_team + rev_train + rev_hobby
     
+    # 支出 = 開班數 * 每班固定支出
     exp_team = n_team * cost_team_unit
     exp_train = n_train * cost_train_unit
     exp_hobby = n_hobby * cost_hobby_unit
@@ -360,17 +362,17 @@ elif menu == "💰 學費與預算核算":
     profit = total_revenue - total_expense
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("預計總收入", f"${total_revenue:,}")
-    m2.metric("預計總支出 (固定成本)", f"${total_expense:,}")
-    m3.metric("預計利潤", f"${profit:,}", delta=float(profit))
+    m1.metric("預計總收入 (學費)", f"${total_revenue:,}")
+    m2.metric("預計總支出 (開班費)", f"${total_expense:,}")
+    m3.metric("預計淨利潤", f"${profit:,}", delta=float(profit))
 
     # 詳細表格
     summary_data = {
         "班別名稱": ["校隊訓練班", "非校隊訓練班", "簡易運動班", "總計"],
-        "開班數量": [n_team, n_train, n_hobby, (n_team + n_train + n_hobby)],
-        "預計人數": [n_team*p_team, n_train*p_train, n_hobby*p_hobby, (n_team*p_team + n_train*p_train + n_hobby*p_hobby)],
-        "單位支出 ($)": [cost_team_unit, cost_train_unit, cost_hobby_unit, "-"],
-        "總收入 ($)": [rev_team, rev_train, rev_hobby, total_revenue],
-        "總支出 ($)": [exp_team, exp_train, exp_hobby, total_expense]
+        "開班數量 (支出單位)": [n_team, n_train, n_hobby, (n_team + n_train + n_hobby)],
+        "預計學生總數": [n_team*p_team, n_train*p_train, n_hobby*p_hobby, (n_team*p_team + n_train*p_train + n_hobby*p_hobby)],
+        "單位開班費 ($)": [cost_team_unit, cost_train_unit, cost_hobby_unit, "-"],
+        "學費收入 ($)": [rev_team, rev_train, rev_hobby, total_revenue],
+        "開班支出 ($)": [exp_team, exp_train, exp_hobby, total_expense]
     }
     st.table(pd.DataFrame(summary_data))
