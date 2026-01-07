@@ -45,11 +45,11 @@ def load_cloud_data(collection_name, default_data):
     key = f"cloud_{collection_name}"
     if st.session_state.get('db') is not None:
         try:
-            docs = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name).stream()
+            coll_path = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
+            docs = coll_path.stream()
             data = [doc.to_dict() for doc in docs]
             if data:
                 df = pd.DataFrame(data)
-                # 自動清理標題空格
                 df.columns = [str(c).strip() for c in df.columns]
                 st.session_state[key] = df
                 return df
@@ -62,23 +62,24 @@ def load_cloud_data(collection_name, default_data):
     return df_default
 
 def save_cloud_data(collection_name, df):
-    # 移除完全為空的行與清理數據
     df = df.dropna(how='all')
     key = f"cloud_{collection_name}"
     st.session_state[key] = df
     if st.session_state.get('db') is not None:
         try:
             coll_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
-            # 先刪除舊數據以保持同步 (簡單處理)
             for doc in coll_ref.stream():
                 doc.reference.delete()
             
             for _, row in df.iterrows():
-                # 根據不同集合決定 ID
-                if '姓名' in row and pd.notna(row['姓名']): doc_id = str(row['姓名'])
-                elif '班級' in row and pd.notna(row['班級']): doc_id = str(row['班級'])
-                elif '活動名稱' in row and pd.notna(row['活動名稱']): doc_id = str(row['活動名稱'])
-                else: doc_id = str(np.random.randint(1000000))
+                if '姓名' in row and pd.notna(row['姓名']): 
+                    doc_id = f"{row.get('班級', 'default')}_{row['姓名']}"
+                elif '班級' in row and pd.notna(row['班級']): 
+                    doc_id = str(row['班級'])
+                elif '活動名稱' in row and pd.notna(row['活動名稱']): 
+                    doc_id = str(row['活動名稱'])
+                else: 
+                    doc_id = str(np.random.randint(1000000))
                 
                 clean_row = {k: (v if pd.notna(v) else None) for k, v in row.to_dict().items()}
                 coll_ref.document(doc_id).set(clean_row)
@@ -100,31 +101,29 @@ def check_password():
 # --- 4. 數據初始化 ---
 force_refresh = st.sidebar.button("🔄 強制刷新雲端數據")
 
-# 4a. 訓練日程
 if 'schedule_df' not in st.session_state or force_refresh:
     st.session_state.schedule_df = load_cloud_data('schedules', [
         {"班級": "壁球校隊訓練班", "地點": "太和體育館", "時間": "16:00-17:30", "日期": "逢星期三", "堂數": 11, "具體日期": "17/12/25, 7/1/26, 14/1/26, 21/1/26, 28/1/26"},
     ])
 
-# 4b. 訓練班名單 (僅用於點名)
 if 'class_players_df' not in st.session_state or force_refresh:
     st.session_state.class_players_df = load_cloud_data('class_players', [
         {"班級": "壁球校隊訓練班", "姓名": "範例學生A", "性別": "男"},
         {"班級": "壁球校隊訓練班", "姓名": "範例學生B", "性別": "女"},
     ])
 
-# 4c. 全校排名名單 (僅用於排行榜)
 if 'rank_df' not in st.session_state or force_refresh:
     st.session_state.rank_df = load_cloud_data('rankings', [
         {"姓名": "李澤朗", "積分": 1000, "年級": "P.6"},
         {"姓名": "王冠軒", "積分": 1000, "年級": "P.4"},
     ])
 
-# 4d. 活動公告
 if 'announcements_df' not in st.session_state or force_refresh:
-    st.session_state.announcements_df = load_cloud_data('announcements', [
-        {"活動名稱": "全港學界壁球比賽", "日期": "2026-05-10", "詳情": "請校隊成員準時出席", "感興趣人數": 0}
-    ])
+    st.session_state.announcements_df = load_cloud_data('announcements', [])
+
+# 考勤紀錄儲存
+if 'attendance_records' not in st.session_state or force_refresh:
+    st.session_state.attendance_records = load_cloud_data('attendance_records', [])
 
 # --- 側邊欄 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
@@ -156,13 +155,12 @@ if menu == "📅 訓練日程表":
                 st.rerun()
     st.dataframe(st.session_state.schedule_df, use_container_width=True)
 
-# --- 2. 排行榜 (獨立匯入與排名從1開始) ---
+# --- 2. 排行榜 ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
-    
     if st.session_state.is_admin:
-        with st.expander("📥 匯入排名名單 (與訓練班名單分開)"):
-            u_rank = st.file_uploader("上傳排名 Excel (需含姓名、積分、年級)", type=["xlsx"], key="u_rank")
+        with st.expander("📥 匯入排名名單"):
+            u_rank = st.file_uploader("上傳排名 Excel", type=["xlsx"], key="u_rank")
             if u_rank:
                 df_r = pd.read_excel(u_rank)
                 df_r.columns = [str(c).strip() for c in df_r.columns]
@@ -172,33 +170,28 @@ elif menu == "🏆 隊員排行榜":
                     st.rerun()
 
     display_df = st.session_state.rank_df.copy()
-    
     if "積分" in display_df.columns:
         display_df["積分"] = pd.to_numeric(display_df["積分"], errors='coerce').fillna(0)
         display_df = display_df.sort_values("積分", ascending=False).reset_index(drop=True)
-        # 排名從 1 開始
         display_df.insert(0, '排名', range(1, 1 + len(display_df)))
     
     if st.session_state.is_admin:
-        st.info("管理員可直接在下方修改數據：")
         edited_r = st.data_editor(display_df, num_rows="dynamic", use_container_width=True)
         if st.button("💾 儲存排名變更"):
-            # 儲存時移除「排名」欄位，它是自動生成的
-            if '排名' in edited_r.columns:
-                edited_r = edited_r.drop(columns=['排名'])
+            if '排名' in edited_r.columns: edited_r = edited_r.drop(columns=['排名'])
             st.session_state.rank_df = edited_r
             save_cloud_data('rankings', edited_r)
             st.rerun()
     else:
         st.table(display_df)
 
-# --- 3. 考勤點名 (使用獨立的訓練班名單) ---
+# --- 3. 考勤點名 (Checklist UI) ---
 elif menu == "📝 考勤點名":
     st.title("📝 考勤點名系統")
     
     if st.session_state.is_admin:
         with st.expander("📥 匯入各班訓練名單"):
-            u_class = st.file_uploader("上傳班級名單 Excel (需含班級、姓名)", type=["xlsx"], key="u_class")
+            u_class = st.file_uploader("上傳班級名單 Excel (班級, 姓名)", type=["xlsx"], key="u_class")
             if u_class:
                 df_c = pd.read_excel(u_class)
                 df_c.columns = [str(c).strip() for c in df_c.columns]
@@ -210,26 +203,62 @@ elif menu == "📝 考勤點名":
     class_list = st.session_state.schedule_df["班級"].unique().tolist()
     sel_class = st.selectbox("請選擇班級", class_list)
     
-    # 取得日期
     class_info = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == sel_class]
     if not class_info.empty:
         dates = [d.strip() for d in str(class_info.iloc[0]["具體日期"]).split(",")]
         sel_date = st.selectbox("請選擇日期", dates)
         
-        # 從獨立名單中取得該班級學生
+        # 取得該班級學生名單
         class_players = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class]["姓名"].tolist()
         
         if class_players:
-            st.subheader(f"點名：{sel_class} ({len(class_players)}人)")
+            st.markdown(f"### 📋 {sel_class} - 點名冊 ({sel_date})")
+            st.info("請在出席的學生旁勾選 Checkbox，完成後點擊下方儲存。")
+            
+            # 使用 Columns 建立 Checklist 佈局
+            cols_per_row = 3
+            rows = [class_players[i:i + cols_per_row] for i in range(0, len(class_players), cols_per_row)]
+            
+            attendance_dict = {}
+            
+            # 建立 Checklist
+            for row_players in rows:
+                cols = st.columns(cols_per_row)
+                for i, name in enumerate(row_players):
+                    with cols[i]:
+                        # 顯示勾選框
+                        is_present = st.checkbox(name, key=f"check_{sel_class}_{sel_date}_{name}")
+                        status_label = "✅ 已出席" if is_present else "⬜ 未到"
+                        st.caption(status_label)
+                        attendance_dict[name] = is_present
+            
+            st.divider()
+            
             if st.session_state.is_admin:
-                for name in class_players:
-                    st.checkbox(name, key=f"att_{sel_class}_{name}_{sel_date}")
-                if st.button("💾 提交點名紀錄"):
-                    st.success("紀錄已更新")
+                if st.button("💾 提交今日點名紀錄", use_container_width=True, type="primary"):
+                    present_list = [name for name, present in attendance_dict.items() if present]
+                    # 建立紀錄
+                    new_record = {
+                        "班級": sel_class,
+                        "日期": sel_date,
+                        "出席人數": len(present_list),
+                        "出席名單": ", ".join(present_list),
+                        "提交時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    # 更新或新增紀錄
+                    records_df = st.session_state.attendance_records
+                    if not records_df.empty:
+                        # 移除舊的同班級同日期紀錄
+                        records_df = records_df[~((records_df["班級"] == sel_class) & (records_df["日期"] == sel_date))]
+                    
+                    st.session_state.attendance_records = pd.concat([records_df, pd.DataFrame([new_record])], ignore_index=True)
+                    save_cloud_data('attendance_records', st.session_state.attendance_records)
+                    st.success(f"🎉 點名成功！今日出席人數：{len(present_list)}")
             else:
-                st.write(class_players)
+                st.warning("⚠️ 僅管理員/教練權限可提交點名紀錄。")
         else:
-            st.warning("此班級暫無名單，請管理員匯入名單。")
+            st.warning("此班級暫無名單。")
 
 # --- 4. 活動公告 ---
 elif menu == "📢 活動公告":
@@ -254,6 +283,7 @@ elif menu == "📢 活動公告":
 # --- 5. 財務預算 ---
 elif menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 預算與營運核算")
+    # ... (財務部分保持不變)
     c1, c2, c3 = st.columns(3)
     cost_team = c1.number_input("校隊班 成本", value=2750)
     cost_train = c2.number_input("培訓班 成本", value=1350)
