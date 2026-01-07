@@ -108,8 +108,8 @@ if 'schedule_df' not in st.session_state or force_refresh:
 
 if 'class_players_df' not in st.session_state or force_refresh:
     st.session_state.class_players_df = load_cloud_data('class_players', [
-        {"班級": "壁球校隊訓練班", "姓名": "範例學生A", "性別": "男"},
-        {"班級": "壁球校隊訓練班", "姓名": "範例學生B", "性別": "女"},
+        {"班級": "壁球校隊訓練班", "姓名": "範例學生A", "性別": "男", "年級": "P.4"},
+        {"班級": "壁球校隊訓練班", "姓名": "範例學生B", "性別": "女", "年級": "P.5"},
     ])
 
 if 'rank_df' not in st.session_state or force_refresh:
@@ -121,7 +121,6 @@ if 'rank_df' not in st.session_state or force_refresh:
 if 'announcements_df' not in st.session_state or force_refresh:
     st.session_state.announcements_df = load_cloud_data('announcements', [])
 
-# 考勤紀錄儲存
 if 'attendance_records' not in st.session_state or force_refresh:
     st.session_state.attendance_records = load_cloud_data('attendance_records', [])
 
@@ -160,7 +159,7 @@ elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
     if st.session_state.is_admin:
         with st.expander("📥 匯入排名名單"):
-            u_rank = st.file_uploader("上傳排名 Excel", type=["xlsx"], key="u_rank")
+            u_rank = st.file_uploader("上傳排名 Excel (需含姓名、積分、年級)", type=["xlsx"], key="u_rank")
             if u_rank:
                 df_r = pd.read_excel(u_rank)
                 df_r.columns = [str(c).strip() for c in df_r.columns]
@@ -185,13 +184,13 @@ elif menu == "🏆 隊員排行榜":
     else:
         st.table(display_df)
 
-# --- 3. 考勤點名 (Checklist UI) ---
+# --- 3. 考勤點名 (顯示班別、姓名、年級) ---
 elif menu == "📝 考勤點名":
     st.title("📝 考勤點名系統")
     
     if st.session_state.is_admin:
         with st.expander("📥 匯入各班訓練名單"):
-            u_class = st.file_uploader("上傳班級名單 Excel (班級, 姓名)", type=["xlsx"], key="u_class")
+            u_class = st.file_uploader("上傳班級名單 Excel (欄位應含：班級, 姓名, 年級)", type=["xlsx"], key="u_class")
             if u_class:
                 df_c = pd.read_excel(u_class)
                 df_c.columns = [str(c).strip() for c in df_c.columns]
@@ -201,89 +200,89 @@ elif menu == "📝 考勤點名":
                     st.rerun()
 
     class_list = st.session_state.schedule_df["班級"].unique().tolist()
-    sel_class = st.selectbox("請選擇班級", class_list)
+    sel_class = st.selectbox("請選擇參加班別", class_list)
     
     class_info = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == sel_class]
     if not class_info.empty:
         dates = [d.strip() for d in str(class_info.iloc[0]["具體日期"]).split(",")]
-        sel_date = st.selectbox("請選擇日期", dates)
+        sel_date = st.selectbox("請選擇點名日期", dates)
         
-        # 取得該班級學生名單
-        class_players = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class]["姓名"].tolist()
+        # 取得該班級學生名單及其詳細資料
+        current_players_df = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class]
         
-        if class_players:
-            st.markdown(f"### 📋 {sel_class} - 點名冊 ({sel_date})")
-            st.info("請在出席的學生旁勾選 Checkbox，完成後點擊下方儲存。")
+        if not current_players_df.empty:
+            st.markdown(f"#### 📅 {sel_date} | 🎯 {sel_class}")
+            st.info("請勾選出席的學生名單：")
             
-            # 使用 Columns 建立 Checklist 佈局
+            # 使用 Columns 建立 Checklist
             cols_per_row = 3
-            rows = [class_players[i:i + cols_per_row] for i in range(0, len(class_players), cols_per_row)]
+            players_list = current_players_df.to_dict('records')
+            rows = [players_list[i:i + cols_per_row] for i in range(0, len(players_list), cols_per_row)]
             
             attendance_dict = {}
             
-            # 建立 Checklist
-            for row_players in rows:
+            for player_row in rows:
                 cols = st.columns(cols_per_row)
-                for i, name in enumerate(row_players):
+                for i, player in enumerate(player_row):
+                    name = player.get("姓名", "未知")
+                    grade = player.get("年級", player.get("班級(校)", "-")) # 彈性處理年級/校內班級欄位
+                    
                     with cols[i]:
-                        # 顯示勾選框
-                        is_present = st.checkbox(name, key=f"check_{sel_class}_{sel_date}_{name}")
-                        status_label = "✅ 已出席" if is_present else "⬜ 未到"
-                        st.caption(status_label)
+                        # Checklist UI: 顯示姓名與年級
+                        st.markdown(f"**{name}**")
+                        is_present = st.checkbox(f"出席", key=f"at_{sel_class}_{sel_date}_{name}")
+                        st.caption(f"學年班級: {grade}")
+                        
                         attendance_dict[name] = is_present
-            
-            st.divider()
+                        st.write("---")
             
             if st.session_state.is_admin:
-                if st.button("💾 提交今日點名紀錄", use_container_width=True, type="primary"):
-                    present_list = [name for name, present in attendance_dict.items() if present]
-                    # 建立紀錄
+                if st.button("💾 儲存並提交點名紀錄", use_container_width=True, type="primary"):
+                    present_list = [n for n, p in attendance_dict.items() if p]
                     new_record = {
-                        "班級": sel_class,
+                        "參加班別": sel_class,
                         "日期": sel_date,
                         "出席人數": len(present_list),
                         "出席名單": ", ".join(present_list),
-                        "提交時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        "最後更新": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
                     
-                    # 更新或新增紀錄
                     records_df = st.session_state.attendance_records
                     if not records_df.empty:
-                        # 移除舊的同班級同日期紀錄
-                        records_df = records_df[~((records_df["班級"] == sel_class) & (records_df["日期"] == sel_date))]
+                        # 避免重複日期重複紀錄
+                        records_df = records_df[~((records_df["參加班別"] == sel_class) & (records_df["日期"] == sel_date))]
                     
                     st.session_state.attendance_records = pd.concat([records_df, pd.DataFrame([new_record])], ignore_index=True)
                     save_cloud_data('attendance_records', st.session_state.attendance_records)
-                    st.success(f"🎉 點名成功！今日出席人數：{len(present_list)}")
+                    st.success(f"✅ 已儲存！今日 {sel_class} 出席人數：{len(present_list)}")
             else:
-                st.warning("⚠️ 僅管理員/教練權限可提交點名紀錄。")
+                st.warning("⚠️ 目前為查看模式，如需點名請先登入管理員。")
         else:
-            st.warning("此班級暫無名單。")
+            st.warning("⚠️ 系統內無此班級的學生名單，請先匯入 Excel。")
 
 # --- 4. 活動公告 ---
 elif menu == "📢 活動公告":
-    st.title("📢 賽事公告")
+    st.title("📢 賽事與活動公告")
     if st.session_state.is_admin:
         with st.form("new_event"):
             e_name = st.text_input("活動名稱")
             e_date = st.date_input("日期")
-            e_desc = st.text_area("詳情")
-            if st.form_submit_button("🚀 發佈"):
+            e_desc = st.text_area("活動詳情")
+            if st.form_submit_button("🚀 發佈公告"):
                 new_e = {"活動名稱": e_name, "日期": str(e_date), "詳情": e_desc, "感興趣人數": 0}
                 st.session_state.announcements_df = pd.concat([st.session_state.announcements_df, pd.DataFrame([new_e])], ignore_index=True)
                 save_cloud_data('announcements', st.session_state.announcements_df)
                 st.rerun()
     
-    for idx, row in st.session_state.announcements_df.iterrows():
+    for _, row in st.session_state.announcements_df.iterrows():
         with st.container(border=True):
             st.subheader(row['活動名稱'])
-            st.write(f"日期: {row['日期']}")
+            st.caption(f"📅 日期: {row['日期']}")
             st.write(row['詳情'])
 
 # --- 5. 財務預算 ---
 elif menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 預算與營運核算")
-    # ... (財務部分保持不變)
     c1, c2, c3 = st.columns(3)
     cost_team = c1.number_input("校隊班 成本", value=2750)
     cost_train = c2.number_input("培訓班 成本", value=1350)
