@@ -3,9 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import io
-from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # 嘗試匯入 Firebase 套件
 try:
@@ -50,13 +47,8 @@ app_id = "squash-management-v1"
 
 # --- 2. 身份驗證功能 ---
 def sign_in_with_email(email, password):
-    """
-    模擬電子郵件驗證邏輯
-    在實際環境中，管理員郵件將獲得 is_admin 權限
-    """
     if email and password:
         st.session_state.user_email = email
-        # 簡單邏輯：校網郵件或特定郵件設為管理員
         if email.endswith("@possa.edu.hk") or email == "admin@test.com":
             st.session_state.is_admin = True
         else:
@@ -76,7 +68,6 @@ def load_cloud_data(collection_name, default_data):
             if data:
                 df = pd.DataFrame(data)
                 df.columns = [str(c).strip() for c in df.columns]
-                # 確保考勤表有必要的欄位
                 if collection_name == 'attendance_records':
                     for col in ["班級", "日期", "出席人數", "出席名單", "記錄人"]:
                         if col not in df.columns: df[col] = ""
@@ -103,7 +94,6 @@ def save_cloud_data(collection_name, df):
             coll_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
             for doc in coll_ref.stream(): doc.reference.delete()
             for _, row in df.iterrows():
-                # 定義唯一的 Document ID
                 if collection_name == 'attendance_records':
                     doc_id = f"{row.get('班級', 'Unknown')}_{row.get('日期', 'Unknown')}".replace("/", "-")
                 elif collection_name == 'announcements':
@@ -121,52 +111,7 @@ def save_cloud_data(collection_name, df):
         except Exception as e:
             st.error(f"同步失敗: {e}")
 
-# --- 4. 通告生成工具 ---
-def generate_docx(template_data):
-    """
-    生成 Word 格式的活動通告
-    """
-    doc = Document()
-    
-    # 標題
-    title = doc.add_heading(f"香海正覺蓮社佛教正覺蓮社學校", 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    sub_title = doc.add_paragraph(f"2025-2026年度 {template_data['班級名稱']} 活動通知")
-    sub_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    doc.add_paragraph(f"\n各位家長：")
-    doc.add_paragraph(f"　　為推廣壁球運動及提高學生的技術水平，本校將舉辦「{template_data['班級名稱']}」。詳情如下：")
-    
-    # 建立細節表格
-    table = doc.add_table(rows=5, cols=2)
-    table.style = 'Table Grid'
-    
-    details = [
-        ("上課日期", template_data['日期列表']),
-        ("上課時間", template_data['時間']),
-        ("地點", template_data['地點']),
-        ("堂數", f"{template_data['堂數']} 堂"),
-        ("費用", f"港幣 ${template_data['費用']} 元正")
-    ]
-    
-    for i, (label, value) in enumerate(details):
-        table.rows[i].cells[0].text = label
-        table.rows[i].cells[1].text = str(value)
-    
-    doc.add_paragraph(f"\n備註：請學生穿著整齊體育服及帶備足夠飲用水。")
-    doc.add_paragraph(f"\n此致\n貴家長")
-    
-    # 簽名欄
-    p_sign = doc.add_paragraph()
-    p_sign.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p_sign.add_run(f"\n校長　陳章萍　謹啟\n{datetime.now().strftime('%Y年%m月%d日')}")
-    
-    target = io.BytesIO()
-    doc.save(target)
-    return target.getvalue()
-
-# --- 5. 初始化 Session State ---
+# --- 4. 初始化 Session State ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'is_admin' not in st.session_state:
@@ -174,7 +119,7 @@ if 'is_admin' not in st.session_state:
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 
-# --- 6. 側邊欄與登入邏輯 ---
+# --- 5. 側邊欄與登入邏輯 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
 
 if not st.session_state.logged_in:
@@ -203,7 +148,6 @@ if not st.session_state.logged_in:
     st.info("請登入後使用系統功能。")
     st.stop()
 
-# 登入後的側邊欄
 st.sidebar.success(f"👤 {st.session_state.user_email}")
 if st.session_state.is_admin:
     st.sidebar.caption("🛡️ 管理員權限")
@@ -213,7 +157,7 @@ if st.sidebar.button("🔌 登出"):
     st.session_state.is_admin = False
     st.rerun()
 
-# --- 7. 數據加載 ---
+# --- 6. 數據加載 ---
 force_refresh = st.sidebar.button("🔄 刷新雲端數據")
 if 'schedule_df' not in st.session_state or force_refresh:
     st.session_state.schedule_df = load_cloud_data('schedules', [])
@@ -229,14 +173,13 @@ if 'tournaments_df' not in st.session_state or force_refresh:
     st.session_state.tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
 
 # 菜單導航
-menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "🗓️ 比賽報名與賽程", "📄 通告生成器"]
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
-    menu_options.append("💰 學費預算計算")
+    menu_options.append("💰 學費與預算核算")
 menu = st.sidebar.radio("功能選單", menu_options)
 
-# --- 8. 頁面模組 ---
+# --- 7. 頁面模組 ---
 
-# --- 訓練日程表 ---
 if menu == "📅 訓練日程表":
     st.title("📅 訓練班日程管理")
     if st.session_state.is_admin:
@@ -252,7 +195,6 @@ if menu == "📅 訓練日程表":
     else:
         st.info("暫無日程。")
 
-# --- 隊員排行榜 ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
     if st.session_state.is_admin:
@@ -266,13 +208,11 @@ elif menu == "🏆 隊員排行榜":
     
     if not st.session_state.rank_df.empty:
         display_rank_df = st.session_state.rank_df.copy()
-        # 修正：第一名是 1 而不是 0
         display_rank_df.index = np.arange(1, len(display_rank_df) + 1)
         st.table(display_rank_df)
     else:
         st.info("暫無積分數據。")
 
-# --- 考勤點名 ---
 elif menu == "📝 考勤點名":
     st.title("📝 考勤點名與報表")
     if st.session_state.is_admin:
@@ -336,7 +276,6 @@ elif menu == "📝 考勤點名":
         with tab2:
             st.dataframe(st.session_state.attendance_records[st.session_state.attendance_records["班級"] == sel_class], use_container_width=True)
 
-# --- 活動公告 ---
 elif menu == "📢 活動公告":
     st.title("📢 賽事及活動公告")
     if st.session_state.is_admin:
@@ -361,7 +300,6 @@ elif menu == "📢 活動公告":
                         save_cloud_data('announcements', st.session_state.announcements_df)
                         st.rerun()
 
-# --- 比賽報名與賽程 ---
 elif menu == "🗓️ 比賽報名與賽程":
     st.title("🗓️ 賽事報名與賽程管理")
     if st.session_state.is_admin:
@@ -380,52 +318,57 @@ elif menu == "🗓️ 比賽報名與賽程":
                     st.rerun()
     st.dataframe(st.session_state.tournaments_df, use_container_width=True)
 
-# --- 通告生成器 ---
-elif menu == "📄 通告生成器":
-    st.title("📄 智慧通告生成器")
-    if st.session_state.schedule_df.empty:
-        st.error("❌ 請先匯入『訓練日程表』數據。")
-    else:
-        class_list = st.session_state.schedule_df["班級"].unique().tolist()
-        sel_class = st.selectbox("選擇班別", class_list)
-        class_info = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == sel_class].iloc[0]
-        
-        col1, col2 = st.columns(2)
-        fee = col1.number_input("學費費用 ($)", value=250)
-        loc = col2.text_input("地點", value=str(class_info.get("地點", "")))
-        time_v = col1.text_input("時間", value=str(class_info.get("時間", "")))
-        count_v = col2.text_input("堂數", value=str(class_info.get("堂數", "")))
-        dates_v = st.text_area("日期列表", value=str(class_info.get("具體日期", "")))
-        
-        if st.button("📝 生成 Word 通告"):
-            t_data = {
-                "班級名稱": sel_class, "日期列表": dates_v, "地點": loc,
-                "堂數": count_v, "費用": fee, "時間": time_v
-            }
-            docx_bytes = generate_docx(t_data)
-            st.download_button(
-                label="📥 下載 Word 檔案",
-                data=docx_bytes,
-                file_name=f"正覺壁球通告_{sel_class}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-# --- 學費預算計算 ---
-elif menu == "💰 學費預算計算":
-    st.title("💰 預算與營運核算")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        n_team = st.number_input("校隊開班數", value=1)
-        p_team = st.number_input("校隊平均人數", value=12)
-        fee_team = st.number_input("校隊學費 ($)", value=250)
-    with c2:
-        n_train = st.number_input("培訓開班數", value=3)
-        p_train = st.number_input("培訓平均人數", value=10)
-        fee_train = st.number_input("培訓學費 ($)", value=250)
-    with c3:
-        n_hobby = st.number_input("興趣開班數", value=4)
-        p_hobby = st.number_input("興趣平均人數", value=16)
-        fee_hobby = st.number_input("興趣學費 ($)", value=250)
+elif menu == "💰 學費與預算核算":
+    st.title("💰 營運成本與學費預算核算")
     
-    rev = (n_team*p_team*fee_team) + (n_train*p_train*fee_train) + (n_hobby*p_hobby*fee_hobby)
-    st.metric("總預計收入", f"${rev:,}")
+    st.markdown("### 1️⃣ 收入預估 (手動輸入)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write("**校隊與精英班**")
+        n_team = st.number_input("校隊/精英班總人數", value=20, min_value=0)
+        fee_team = st.number_input("校隊學費 ($)", value=250, min_value=0)
+    with col2:
+        st.write("**培訓訓練班**")
+        n_train = st.number_input("培訓班總人數", value=30, min_value=0)
+        fee_train = st.number_input("培訓學費 ($)", value=250, min_value=0)
+    with col3:
+        st.write("**興趣班**")
+        n_hobby = st.number_input("興趣班總人數", value=40, min_value=0)
+        fee_hobby = st.number_input("興趣班學費 ($)", value=250, min_value=0)
+    
+    total_revenue = (n_team * fee_team) + (n_train * fee_train) + (n_hobby * fee_hobby)
+    
+    st.markdown("---")
+    st.markdown("### 2️⃣ 支出預估 (手動輸入)")
+    exp1, exp2, exp3 = st.columns(3)
+    with exp1:
+        st.write("**教練支出**")
+        coach_rate = st.number_input("教練平均時薪 ($)", value=300)
+        coach_hours = st.number_input("全學期預計總時數 (h)", value=150)
+        total_coach_cost = coach_rate * coach_hours
+        st.caption(f"小計: ${total_coach_cost:,}")
+    with exp2:
+        st.write("**場地租金**")
+        court_rate = st.number_input("平均場地時租 ($)", value=24)
+        court_hours = st.number_input("全學期租用總時數 (h)", value=120)
+        total_court_cost = court_rate * court_hours
+        st.caption(f"小計: ${total_court_cost:,}")
+    with exp3:
+        st.write("**其他支出**")
+        misc_cost = st.number_input("行政/器材/獎品支出 ($)", value=1000)
+        st.caption("手動輸入雜項金額")
+
+    total_expense = total_coach_cost + total_court_cost + misc_cost
+    net_profit = total_revenue - total_expense
+    
+    st.markdown("---")
+    st.markdown("### 📊 核算結果")
+    res1, res2, res3 = st.columns(3)
+    res1.metric("預計總收入", f"${total_revenue:,}")
+    res2.metric("預計總支出", f"${total_expense:,}", delta=f"-{total_expense:,}", delta_color="inverse")
+    res3.metric("淨利潤 (盈餘/虧損)", f"${net_profit:,}", delta=f"{net_profit:,}")
+
+    if net_profit < 0:
+        st.error("⚠️ 目前預算顯示為虧損狀態，請考慮調整學費或教練時數。")
+    else:
+        st.success("✅ 目前預算運作良好。")
