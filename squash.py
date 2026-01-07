@@ -364,40 +364,39 @@ elif menu == "🏅 學生得獎紀錄":
                     st.rerun()
 
     if not st.session_state.awards_df.empty:
-        # 如果是學生登入，嘗試匹配其姓名（假設 class_players 有連結）
         student_real_name = ""
         if not st.session_state.is_admin:
-            # 根據 user_id (如 1A01) 尋找對應的姓名
             match = st.session_state.class_players_df[st.session_state.class_players_df["班級"] + st.session_state.class_players_df["學號"].astype(str).str.zfill(2) == st.session_state.user_id]
             if not match.empty:
                 student_real_name = match.iloc[0]["姓名"]
 
         st.markdown("### 🏆 榮譽榜單")
         
-        # 顯示得獎卡片
         for index, row in st.session_state.awards_df.sort_values(by="日期", ascending=False).iterrows():
             is_own_award = (row["學生姓名"] == student_real_name)
             
-            with st.container():
-                # 學生看到自己的獎項會高亮
-                bg_color = "#f0f2f6" if is_own_award else "white"
-                border = "2px solid #ff4b4b" if is_own_award else "1px solid #ddd"
-                
-                st.markdown(f"""
-                <div style="background-color: {bg_color}; padding: 15px; border-radius: 10px; border: {border}; margin-bottom: 10px;">
-                    <h3 style="margin:0; color: #1f77b4;">{row['獎項']}</h3>
-                    <p style="margin:5px 0;"><b>比賽：</b>{row['比賽名稱']}</p>
-                    <p style="margin:5px 0;"><b>獲獎學生：</b>{row['學生姓名']} { ' (⭐ 您自己)' if is_own_award else ''}</p>
-                    <p style="margin:5px 0; font-size: 0.8em; color: gray;">📅 {row['日期']}</p>
-                    <p style="margin:5px 0; font-style: italic;">{row['備註'] if row['備註'] else ''}</p>
+            # 修正文字顏色問題：強制指定 color: #333333 或 #000000 確保在白色背景下可見
+            bg_color = "#e8f0fe" if is_own_award else "#ffffff"
+            border = "2px solid #1a73e8" if is_own_award else "1px solid #e0e0e0"
+            text_color = "#202124" # 深灰色文字，確保可視性
+            
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 18px; border-radius: 12px; border: {border}; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="margin:0; color: #1a73e8; font-size: 1.4em;">🏆 {row['獎項']}</h3>
+                <div style="color: {text_color}; margin-top: 10px;">
+                    <p style="margin:4px 0;"><b>比賽名稱：</b>{row['比賽名稱']}</p>
+                    <p style="margin:4px 0;"><b>獲獎學生：</b>{row['學生姓名']} { ' <span style="color:#d93025; font-weight:bold;">(⭐ 恭喜您！)</span>' if is_own_award else ''}</p>
+                    <p style="margin:4px 0; font-size: 0.9em; color: #5f6368;">📅 獲獎日期：{row['日期']}</p>
+                    { f'<p style="margin:8px 0 0 0; font-style: italic; border-top: 1px dashed #ccc; padding-top: 8px;">{row["備註"]}</p>' if row["備註"] else '' }
                 </div>
-                """, unsafe_allow_html=True)
-                
-                if st.session_state.is_admin:
-                    if st.button(f"🗑️ 刪除紀錄", key=f"del_award_{index}"):
-                        st.session_state.awards_df = st.session_state.awards_df.drop(index)
-                        save_cloud_data('student_awards', st.session_state.awards_df)
-                        st.rerun()
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.session_state.is_admin:
+                if st.button(f"🗑️ 刪除此項紀錄", key=f"del_award_{index}"):
+                    st.session_state.awards_df = st.session_state.awards_df.drop(index)
+                    save_cloud_data('student_awards', st.session_state.awards_df)
+                    st.rerun()
     else:
         st.info("目前尚無得獎紀錄。")
 
