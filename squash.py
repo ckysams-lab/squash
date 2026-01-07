@@ -320,38 +320,33 @@ elif menu == "🗓️ 比賽報名與賽程":
 
 elif menu == "💰 學費與預算核算":
     st.title("💰 預算與營運核算 (康文署標準)")
-    st.info("收入為學生交的學費；支出為學校按開班數需支付的固定費用。")
+    st.info("收入：該期學生總人數 × 學費。支出：學校按開班數支付給康文署的費用。")
     
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("### 🏆 校隊訓練班")
-        n_team = st.number_input("校隊班開班數", value=1, step=1)
-        p_team = st.number_input("校隊班平均人數", value=12, step=1)
-        fee_team = st.number_input("校隊班學費/人 ($)", value=250)
-        cost_team_unit = 2750
-        
-    with c2:
-        st.markdown("### 📈 非校隊訓練班")
-        n_train = st.number_input("非校隊班開班數", value=3, step=1)
-        p_train = st.number_input("非校隊班平均人數", value=10, step=1)
-        fee_train = st.number_input("非校隊班學費/人 ($)", value=250)
-        cost_train_unit = 1350
-        
-    with c3:
-        st.markdown("### 🎾 簡易運動班")
-        n_hobby = st.number_input("簡易運動班開班數", value=4, step=1)
-        p_hobby = st.number_input("簡易運動班平均人數", value=16, step=1)
-        fee_hobby = st.number_input("簡易運動班學費/人 ($)", value=250)
-        cost_hobby_unit = 1200
+    col_input_left, col_input_right = st.columns([2, 1])
+    
+    with col_input_left:
+        st.subheader("📋 支出設定 (開班數)")
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            n_team = st.number_input("校隊訓練班 (班)", value=1, step=1)
+            cost_team_unit = 2750
+        with sc2:
+            n_train = st.number_input("非校隊訓練班 (班)", value=3, step=1)
+            cost_train_unit = 1350
+        with sc3:
+            n_hobby = st.number_input("簡易運動班 (班)", value=4, step=1)
+            cost_hobby_unit = 1200
+            
+    with col_input_right:
+        st.subheader("💵 收入設定")
+        total_students = st.number_input("該期學生總人數", value=50, step=1)
+        fee_per_student = st.number_input("每位學生學費 ($)", value=250)
 
     st.divider()
     
     # 計算邏輯
     # 收入 = 總人數 * 每人學費
-    rev_team = (n_team * p_team) * fee_team
-    rev_train = (n_train * p_train) * fee_train
-    rev_hobby = (n_hobby * p_hobby) * fee_hobby
-    total_revenue = rev_team + rev_train + rev_hobby
+    total_revenue = total_students * fee_per_student
     
     # 支出 = 開班數 * 每班固定支出
     exp_team = n_team * cost_team_unit
@@ -368,11 +363,10 @@ elif menu == "💰 學費與預算核算":
 
     # 詳細表格
     summary_data = {
-        "班別名稱": ["校隊訓練班", "非校隊訓練班", "簡易運動班", "總計"],
-        "開班數量 (支出單位)": [n_team, n_train, n_hobby, (n_team + n_train + n_hobby)],
-        "預計學生總數": [n_team*p_team, n_train*p_train, n_hobby*p_hobby, (n_team*p_team + n_train*p_train + n_hobby*p_hobby)],
-        "單位開班費 ($)": [cost_team_unit, cost_train_unit, cost_hobby_unit, "-"],
-        "學費收入 ($)": [rev_team, rev_train, rev_hobby, total_revenue],
-        "開班支出 ($)": [exp_team, exp_train, exp_hobby, total_expense]
+        "項目": ["校隊訓練班 (支出)", "非校隊訓練班 (支出)", "簡易運動班 (支出)", "學生學費 (總收入)"],
+        "數量 / 人數": [f"{n_team} 班", f"{n_train} 班", f"{n_hobby} 班", f"{total_students} 人"],
+        "單位金額 ($)": [cost_team_unit, cost_train_unit, cost_hobby_unit, fee_per_student],
+        "小計 ($)": [-exp_team, -exp_train, -exp_hobby, total_revenue]
     }
     st.table(pd.DataFrame(summary_data))
+    st.success(f"💡 結算：本期預計營運利潤為 HK$ {profit:,}")
