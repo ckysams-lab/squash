@@ -174,7 +174,10 @@ elif menu == "🏆 隊員排行榜":
                 st.rerun()
     
     if not st.session_state.rank_df.empty:
-        st.table(st.session_state.rank_df)
+        # 修正：將 DataFrame 的索引加 1，使排名從 1 開始顯示
+        display_rank_df = st.session_state.rank_df.copy()
+        display_rank_df.index = np.arange(1, len(display_rank_df) + 1)
+        st.table(display_rank_df)
     else:
         st.info("暫無積分數據。")
 
