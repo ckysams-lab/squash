@@ -150,7 +150,8 @@ if not st.session_state.logged_in:
             if s_class and s_num:
                 st.session_state.logged_in = True
                 st.session_state.is_admin = False
-                st.session_state.user_id = f"{s_class.upper()}{s_num}"
+                # 確保 user_id 格式一致：大寫班別 + 兩位數學號
+                st.session_state.user_id = f"{s_class.upper()}{s_num.zfill(2)}"
                 st.rerun()
             else:
                 st.sidebar.error("請填寫完整資訊")
@@ -230,7 +231,7 @@ elif menu == "🏆 隊員排行榜":
 elif menu == "📝 考勤點名":
     st.title("📝 考勤點名與報表")
     if st.session_state.is_admin:
-        u_class = st.file_uploader("匯入學生名單 Excel (欄位：班級, 姓名, 年級)", type=["xlsx"])
+        u_class = st.file_uploader("匯入學生名單 Excel (欄位：班級, 姓名, 年級, 學號[選填])", type=["xlsx"])
         if u_class:
             df_c = pd.read_excel(u_class)
             if st.button("🚀 確認更新名單"):
@@ -365,20 +366,24 @@ elif menu == "🏅 學生得獎紀錄":
 
     if not st.session_state.awards_df.empty:
         student_real_name = ""
-        if not st.session_state.is_admin:
-            match = st.session_state.class_players_df[st.session_state.class_players_df["班級"] + st.session_state.class_players_df["學號"].astype(str).str.zfill(2) == st.session_state.user_id]
-            if not match.empty:
-                student_real_name = match.iloc[0]["姓名"]
-
+        # 修正 KeyError 比對邏輯：檢查欄位是否存在
+        if not st.session_state.is_admin and not st.session_state.class_players_df.empty:
+            df_cp = st.session_state.class_players_df
+            # 檢查是否具備 "班級" 和 "學號" 欄位來匹配 user_id
+            if "班級" in df_cp.columns and "學號" in df_cp.columns:
+                match = df_cp[(df_cp["班級"].astype(str).str.upper() + df_cp["學號"].astype(str).str.zfill(2)) == st.session_state.user_id]
+                if not match.empty:
+                    student_real_name = str(match.iloc[0]["姓名"])
+            # 如果沒有學號，嘗試用 user_id 做模糊匹配或僅依賴管理員手動輸入的姓名
+            
         st.markdown("### 🏆 榮譽榜單")
         
         for index, row in st.session_state.awards_df.sort_values(by="日期", ascending=False).iterrows():
-            is_own_award = (row["學生姓名"] == student_real_name)
+            is_own_award = (str(row["學生姓名"]).strip() == str(student_real_name).strip() and student_real_name != "")
             
-            # 修正文字顏色問題：強制指定 color: #333333 或 #000000 確保在白色背景下可見
             bg_color = "#e8f0fe" if is_own_award else "#ffffff"
             border = "2px solid #1a73e8" if is_own_award else "1px solid #e0e0e0"
-            text_color = "#202124" # 深灰色文字，確保可視性
+            text_color = "#202124"
             
             st.markdown(f"""
             <div style="background-color: {bg_color}; padding: 18px; border-radius: 12px; border: {border}; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
