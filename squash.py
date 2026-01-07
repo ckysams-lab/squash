@@ -51,7 +51,6 @@ def get_admin_password():
     default_pwd = "8888"
     if st.session_state.get('db') is not None:
         try:
-            # 路徑: /artifacts/{appId}/public/data/admin_settings/config
             doc_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection('admin_settings').document('config')
             doc = doc_ref.get()
             if doc.exists:
@@ -59,17 +58,6 @@ def get_admin_password():
         except Exception:
             pass
     return default_pwd
-
-def sign_in_with_email(email, password):
-    if email and password:
-        st.session_state.user_email = email
-        if email.endswith("@possa.edu.hk") or email == "admin@test.com":
-            st.session_state.is_admin = True
-        else:
-            st.session_state.is_admin = False
-        st.session_state.logged_in = True
-        return True
-    return False
 
 # --- 3. 數據存取與同步函數 ---
 def load_cloud_data(collection_name, default_data):
@@ -130,45 +118,51 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
-if 'user_email' not in st.session_state:
-    st.session_state.user_email = ""
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = ""
 
 # --- 5. 側邊欄與登入邏輯 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
 
 if not st.session_state.logged_in:
-    st.sidebar.subheader("🔑 用戶登入")
-    login_type = st.sidebar.selectbox("登入方式", ["管理員密碼", "電子郵件"])
+    st.sidebar.subheader("🔑 系統登入")
+    login_mode = st.sidebar.radio("身份選擇", ["學生/家長", "管理員"])
     
-    if login_type == "管理員密碼":
-        pwd = st.sidebar.text_input("輸入密碼", type="password")
-        if st.sidebar.button("登入"):
-            # 改為從 Firebase 獲取密碼
+    if login_mode == "管理員":
+        pwd = st.sidebar.text_input("管理員密碼", type="password")
+        if st.sidebar.button("登入管理系統"):
             admin_pwd = get_admin_password()
             if pwd == admin_pwd:
                 st.session_state.logged_in = True
                 st.session_state.is_admin = True
-                st.session_state.user_email = "admin@possa.edu.hk"
+                st.session_state.user_id = "ADMIN"
                 st.rerun()
             else:
                 st.sidebar.error("密碼錯誤")
     else:
-        email = st.sidebar.text_input("電子郵件")
-        password = st.sidebar.text_input("密碼", type="password")
+        st.sidebar.info("請輸入學生班別及學號 (例如: 1A 01)")
+        c1, c2 = st.sidebar.columns(2)
+        s_class = c1.text_input("班別", placeholder="如: 1A")
+        s_num = c2.text_input("學號", placeholder="如: 01")
         if st.sidebar.button("登入"):
-            if sign_in_with_email(email, password):
+            if s_class and s_num:
+                st.session_state.logged_in = True
+                st.session_state.is_admin = False
+                st.session_state.user_id = f"{s_class.upper()}{s_num}"
                 st.rerun()
             else:
-                st.sidebar.error("驗證失敗")
+                st.sidebar.error("請填寫完整資訊")
     
-    st.info("請登入後使用系統功能。")
+    st.info("👋 歡迎！請先在左側選單登入系統。")
     st.stop()
 
-st.sidebar.success(f"👤 {st.session_state.user_email}")
+# 登入後的側邊欄顯示
 if st.session_state.is_admin:
-    st.sidebar.caption("🛡️ 管理員權限")
+    st.sidebar.success(f"🛡️ 管理員已登入")
+else:
+    st.sidebar.success(f"👤 學生 {st.session_state.user_id} 已登入")
 
-if st.sidebar.button("🔌 登出"):
+if st.sidebar.button("🔌 登出系統"):
     st.session_state.logged_in = False
     st.session_state.is_admin = False
     st.rerun()
@@ -270,22 +264,32 @@ elif menu == "📝 考勤點名":
                 for i, row in enumerate(current_players.to_dict('records')):
                     name = str(row['姓名'])
                     with cols[i % 4]:
-                        attendance_dict[name] = st.checkbox(f"{name}", value=(name in existing_list), key=f"chk_{name}_{sel_date}")
+                        # 非管理員禁用勾選框
+                        attendance_dict[name] = st.checkbox(
+                            f"{name}", 
+                            value=(name in existing_list), 
+                            key=f"chk_{name}_{sel_date}",
+                            disabled=not st.session_state.is_admin
+                        )
                 
-                if st.button("💾 儲存點名", type="primary"):
-                    present_names = [n for n, p in attendance_dict.items() if p]
-                    new_rec = {
-                        "班級": sel_class, 
-                        "日期": sel_date, 
-                        "出席人數": len(present_names), 
-                        "出席名單": ", ".join(present_names),
-                        "記錄人": st.session_state.user_email
-                    }
-                    df_recs = st.session_state.attendance_records
-                    df_recs = df_recs[~((df_recs["班級"] == sel_class) & (df_recs["日期"] == sel_date))]
-                    st.session_state.attendance_records = pd.concat([df_recs, pd.DataFrame([new_rec])], ignore_index=True)
-                    save_cloud_data('attendance_records', st.session_state.attendance_records)
-                    st.success("✅ 儲存成功")
+                # 只有管理員看得到儲存按鈕
+                if st.session_state.is_admin:
+                    if st.button("💾 儲存點名", type="primary"):
+                        present_names = [n for n, p in attendance_dict.items() if p]
+                        new_rec = {
+                            "班級": sel_class, 
+                            "日期": sel_date, 
+                            "出席人數": len(present_names), 
+                            "出席名單": ", ".join(present_names),
+                            "記錄人": st.session_state.user_id
+                        }
+                        df_recs = st.session_state.attendance_records
+                        df_recs = df_recs[~((df_recs["班級"] == sel_class) & (df_recs["日期"] == sel_date))]
+                        st.session_state.attendance_records = pd.concat([df_recs, pd.DataFrame([new_rec])], ignore_index=True)
+                        save_cloud_data('attendance_records', st.session_state.attendance_records)
+                        st.success("✅ 儲存成功")
+                else:
+                    st.caption("ℹ️ 您目前的權限僅能查看點名紀錄，無法進行修改。")
             else:
                 st.info("該班別尚無名單數據。")
 
