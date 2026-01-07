@@ -102,6 +102,8 @@ def save_cloud_data(collection_name, df):
                     doc_id = f"{row.get('日期')}_{row.get('標題', 'NoTitle')}"
                 elif collection_name == 'tournaments':
                     doc_id = f"tm_{row.get('比賽名稱', 'NoName')}_{row.get('日期', 'NoDate')}"
+                elif collection_name == 'student_awards':
+                    doc_id = f"award_{row.get('學生姓名')}_{row.get('日期')}_{np.random.randint(1000)}"
                 elif '姓名' in row and '班級' in row:
                     doc_id = f"{row.get('班級')}_{row.get('姓名')}"
                 else:
@@ -181,9 +183,11 @@ if 'announcements_df' not in st.session_state or force_refresh:
     st.session_state.announcements_df = load_cloud_data('announcements', pd.DataFrame(columns=["標題", "內容", "日期"]))
 if 'tournaments_df' not in st.session_state or force_refresh:
     st.session_state.tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
+if 'awards_df' not in st.session_state or force_refresh:
+    st.session_state.awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
 
 # 菜單導航
-menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "🗓️ 比賽報名與賽程"]
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "🏅 學生得獎紀錄", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
     menu_options.append("💰 學費與預算核算")
 menu = st.sidebar.radio("功能選單", menu_options)
@@ -244,13 +248,12 @@ elif menu == "📝 考勤點名":
         raw_dates = str(class_info.iloc[0].get("具體日期", ""))
         all_dates = [d.strip() for d in raw_dates.split(",") if d.strip()]
         
-        # 判斷是否為管理員，決定顯示哪些 Tab
         if st.session_state.is_admin:
             tabs = st.tabs(["🎯 今日點名", "📊 考勤總表"])
             tab1 = tabs[0]
             tab2 = tabs[1]
         else:
-            tab1 = st.container() # 學生只看到一個容器（今日點名）
+            tab1 = st.container()
             tab2 = None
 
         with tab1:
@@ -300,7 +303,6 @@ elif menu == "📝 考勤點名":
             else:
                 st.info("該班別尚無名單數據。")
 
-        # 只有管理員能看到考勤總表
         if tab2 is not None:
             with tab2:
                 st.markdown(f"### 📊 {sel_class} 考勤總表")
@@ -337,6 +339,67 @@ elif menu == "📝 考勤點名":
                         file_name=f"{sel_class}_attendance_report.csv",
                         mime="text/csv",
                     )
+
+elif menu == "🏅 學生得獎紀錄":
+    st.title("🏅 學生比賽榮譽榜")
+    
+    if st.session_state.is_admin:
+        with st.expander("➕ 新增得獎紀錄"):
+            with st.form("new_award_form", clear_on_submit=True):
+                a_name = st.text_input("學生姓名 (如: 張小明)")
+                a_comp = st.text_input("比賽名稱 (如: 全港青少年壁球錦標賽)")
+                a_prize = st.text_input("獎項 (如: 冠軍 / 優異獎)")
+                a_date = st.date_input("獲獎日期")
+                a_note = st.text_area("備註")
+                if st.form_submit_button("儲存紀錄"):
+                    new_award = {
+                        "學生姓名": a_name,
+                        "比賽名稱": a_comp,
+                        "獎項": a_prize,
+                        "日期": str(a_date),
+                        "備註": a_note
+                    }
+                    st.session_state.awards_df = pd.concat([st.session_state.awards_df, pd.DataFrame([new_award])], ignore_index=True)
+                    save_cloud_data('student_awards', st.session_state.awards_df)
+                    st.rerun()
+
+    if not st.session_state.awards_df.empty:
+        # 如果是學生登入，嘗試匹配其姓名（假設 class_players 有連結）
+        student_real_name = ""
+        if not st.session_state.is_admin:
+            # 根據 user_id (如 1A01) 尋找對應的姓名
+            match = st.session_state.class_players_df[st.session_state.class_players_df["班級"] + st.session_state.class_players_df["學號"].astype(str).str.zfill(2) == st.session_state.user_id]
+            if not match.empty:
+                student_real_name = match.iloc[0]["姓名"]
+
+        st.markdown("### 🏆 榮譽榜單")
+        
+        # 顯示得獎卡片
+        for index, row in st.session_state.awards_df.sort_values(by="日期", ascending=False).iterrows():
+            is_own_award = (row["學生姓名"] == student_real_name)
+            
+            with st.container():
+                # 學生看到自己的獎項會高亮
+                bg_color = "#f0f2f6" if is_own_award else "white"
+                border = "2px solid #ff4b4b" if is_own_award else "1px solid #ddd"
+                
+                st.markdown(f"""
+                <div style="background-color: {bg_color}; padding: 15px; border-radius: 10px; border: {border}; margin-bottom: 10px;">
+                    <h3 style="margin:0; color: #1f77b4;">{row['獎項']}</h3>
+                    <p style="margin:5px 0;"><b>比賽：</b>{row['比賽名稱']}</p>
+                    <p style="margin:5px 0;"><b>獲獎學生：</b>{row['學生姓名']} { ' (⭐ 您自己)' if is_own_award else ''}</p>
+                    <p style="margin:5px 0; font-size: 0.8em; color: gray;">📅 {row['日期']}</p>
+                    <p style="margin:5px 0; font-style: italic;">{row['備註'] if row['備註'] else ''}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.session_state.is_admin:
+                    if st.button(f"🗑️ 刪除紀錄", key=f"del_award_{index}"):
+                        st.session_state.awards_df = st.session_state.awards_df.drop(index)
+                        save_cloud_data('student_awards', st.session_state.awards_df)
+                        st.rerun()
+    else:
+        st.info("目前尚無得獎紀錄。")
 
 elif menu == "📢 活動公告":
     st.title("📢 賽事及活動公告")
@@ -406,7 +469,6 @@ elif menu == "💰 學費與預算核算":
 
     st.divider()
     
-    # 計算邏輯
     total_revenue = total_students * fee_per_student
     exp_team = n_team * cost_team_unit
     exp_train = n_train * cost_train_unit
