@@ -59,16 +59,18 @@ def load_cloud_data(collection_name, default_data):
     return st.session_state[key]
 
 def save_cloud_data(collection_name, df):
+    # 移除完全為空的行
+    df = df.dropna(how='all')
     key = f"cloud_{collection_name}"
     st.session_state[key] = df
     if st.session_state.get('db') is not None:
         try:
             coll_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
             for _, row in df.iterrows():
-                if '姓名' in row: doc_id = str(row['姓名'])
-                elif '班級' in row: doc_id = str(row['班級'])
-                elif '活動名稱' in row: doc_id = str(row['活動名稱'])
-                else: doc_id = str(np.random.randint(100000))
+                if '姓名' in row and pd.notna(row['姓名']): doc_id = str(row['姓名'])
+                elif '班級' in row and pd.notna(row['班級']): doc_id = str(row['班級'])
+                elif '活動名稱' in row and pd.notna(row['活動名稱']): doc_id = str(row['活動名稱'])
+                else: doc_id = str(np.random.randint(1000000))
                 
                 clean_row = {k: (v if pd.notna(v) else None) for k, v in row.to_dict().items()}
                 coll_ref.document(doc_id).set(clean_row)
@@ -131,12 +133,10 @@ if st.session_state.is_admin:
 
 menu = st.sidebar.radio("功能選單", menu_options)
 
-# --- 1. 日程表 (含 Excel 匯入) ---
+# --- 1. 日程表 ---
 if menu == "📅 訓練日程表":
     st.title("📅 訓練班日程管理")
-    
     if st.session_state.is_admin:
-        st.subheader("管理員操作")
         u_sched = st.file_uploader("匯入日程 Excel/CSV", type=["xlsx", "csv"], key="u_sched")
         if u_sched:
             try:
@@ -146,7 +146,6 @@ if menu == "📅 訓練日程表":
                     save_cloud_data('schedules', df_new)
                     st.rerun()
             except Exception as e: st.error(f"讀取錯誤: {e}")
-        
         st.divider()
         edited_sched = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
         if st.button("💾 手動儲存日程變更"):
@@ -156,7 +155,7 @@ if menu == "📅 訓練日程表":
     else:
         st.dataframe(st.session_state.schedule_df, use_container_width=True)
 
-# --- 2. 排行榜 (含 Excel 匯入) ---
+# --- 2. 排行榜 (修復 KeyError 並加強容錯) ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
     
@@ -174,9 +173,16 @@ elif menu == "🏆 隊員排行榜":
 
     sort_option = st.selectbox("排序依據", ["積分 (由高到低)", "姓名", "年級"])
     display_p = st.session_state.players_df.copy()
-    if "積分" in sort_option:
-        display_p = display_p.sort_values("積分", ascending=False)
     
+    # 修復：檢查欄位是否存在，防止 KeyError
+    if "積分" in display_p.columns:
+        if "積分" in sort_option:
+            # 確保積分欄位是數值類型以便正確排序
+            display_p["積分"] = pd.to_numeric(display_p["積分"], errors='coerce').fillna(0)
+            display_p = display_p.sort_values("積分", ascending=False)
+    elif "積分" in sort_option:
+        st.warning("⚠️ 當前數據中找不到『積分』欄位，無法進行積分排序。請檢查匯入的 Excel 標題。")
+
     if st.session_state.is_admin:
         edited_p = st.data_editor(display_p, num_rows="dynamic", use_container_width=True)
         if st.button("💾 儲存隊員資料"):
@@ -215,7 +221,6 @@ elif menu == "📝 考勤點名":
 # --- 4. 活動公告 ---
 elif menu == "📢 活動公告":
     st.title("📢 賽事公告與感興趣統計")
-    
     if st.session_state.is_admin:
         with st.expander("➕ 發佈新活動"):
             with st.form("new_event"):
@@ -248,16 +253,14 @@ elif menu == "📢 活動公告":
                     save_cloud_data('announcements', st.session_state.announcements_df)
                     st.rerun()
 
-# --- 5. 財務預算 (手動輸入版本，僅管理員可見) ---
+# --- 5. 財務預算 (手動輸入版本) ---
 elif menu == "💰 學費預算計算 (管理專用)":
     st.title("💰 預算與營運核算")
     st.info("系統預設成本：校隊班 $2,750 / 培訓班 $1,350 / 興趣班 $1,200")
-    
     c1, c2, c3 = st.columns(3)
     cost_team = c1.number_input("校隊班 成本", value=2750)
     cost_train = c2.number_input("培訓班 成本", value=1350)
     cost_hobby = c3.number_input("興趣班 成本", value=1200)
-    
     col1, col2, col3 = st.columns(3)
     with col1:
         n_t = st.number_input("校隊開班數", value=1)
@@ -268,14 +271,10 @@ elif menu == "💰 學費預算計算 (管理專用)":
     with col3:
         n_h = st.number_input("興趣開班數", value=3)
         p_h = st.number_input("興趣人數 (預計)", value=48)
-
     st.divider()
-    
-    # 預計計算
-    total_income = (p_t + p_tr + p_h) * 250 # 假設平均實收
+    total_income = (p_t + p_tr + p_h) * 250
     total_cost = (n_t * cost_team) + (n_tr * cost_train) + (n_h * cost_hobby)
     balance = total_income - total_cost
-    
     m1, m2, m3 = st.columns(3)
     m1.metric("預計總收入", f"${total_income:,}")
     m2.metric("預計總支出", f"${total_cost:,}")
