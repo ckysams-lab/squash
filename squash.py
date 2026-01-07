@@ -65,7 +65,6 @@ def save_cloud_data(collection_name, df):
         try:
             coll_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
             for _, row in df.iterrows():
-                # 根據不同 collection 決定 doc_id
                 if '姓名' in row: doc_id = str(row['姓名'])
                 elif '班級' in row: doc_id = str(row['班級'])
                 elif '活動名稱' in row: doc_id = str(row['活動名稱'])
@@ -125,7 +124,12 @@ else:
         st.session_state.is_admin = False
         st.rerun()
 
-menu = st.sidebar.radio("功能選單", ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告", "💰 財務預算"])
+# 根據權限定義菜單清單
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "📢 活動公告"]
+if st.session_state.is_admin:
+    menu_options.append("💰 學費預算計算 (管理專用)")
+
+menu = st.sidebar.radio("功能選單", menu_options)
 
 # --- 1. 日程表 (含 Excel 匯入) ---
 if menu == "📅 訓練日程表":
@@ -208,7 +212,7 @@ elif menu == "📝 考勤點名":
     else:
         st.info("僅供查閱，請聯絡教練進行點名。")
 
-# --- 4. 活動公告 (完整功能) ---
+# --- 4. 活動公告 ---
 elif menu == "📢 活動公告":
     st.title("📢 賽事公告與感興趣統計")
     
@@ -224,7 +228,6 @@ elif menu == "📢 活動公告":
                     save_cloud_data('announcements', st.session_state.announcements_df)
                     st.rerun()
 
-    # 顯示公告卡片
     for index, row in st.session_state.announcements_df.iterrows():
         with st.container(border=True):
             col1, col2 = st.columns([3, 1])
@@ -245,16 +248,35 @@ elif menu == "📢 活動公告":
                     save_cloud_data('announcements', st.session_state.announcements_df)
                     st.rerun()
 
-# --- 5. 財務預算 ---
-elif menu == "💰 財務預算":
-    st.title("💰 財務與津貼核算")
-    fee_type = st.radio("計算基準", ["全方位學習津貼 ($250)", "校內特定資助 ($150)"])
-    unit_price = 250 if "250" in fee_type else 150
+# --- 5. 財務預算 (手動輸入版本，僅管理員可見) ---
+elif menu == "💰 學費預算計算 (管理專用)":
+    st.title("💰 預算與營運核算")
+    st.info("系統預設成本：校隊班 $2,750 / 培訓班 $1,350 / 興趣班 $1,200")
     
-    total_stds = st.number_input("預計總人數", value=80)
-    st.metric("預計學費總收入", f"${total_stds * unit_price:,}")
+    c1, c2, c3 = st.columns(3)
+    cost_team = c1.number_input("校隊班 成本", value=2750)
+    cost_train = c2.number_input("培訓班 成本", value=1350)
+    cost_hobby = c3.number_input("興趣班 成本", value=1200)
     
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        n_t = st.number_input("校隊開班數", value=1)
+        p_t = st.number_input("校隊人數 (預計)", value=10)
+    with col2:
+        n_tr = st.number_input("培訓開班數", value=2)
+        p_tr = st.number_input("培訓人數 (預計)", value=20)
+    with col3:
+        n_h = st.number_input("興趣開班數", value=3)
+        p_h = st.number_input("興趣人數 (預計)", value=48)
+
     st.divider()
-    coach_cost = st.number_input("預計總支出 (教練費等)", value=15000)
-    net = (total_stds * unit_price) - coach_cost
-    st.metric("預計收支平衡", f"${net:,}", delta=float(net))
+    
+    # 預計計算
+    total_income = (p_t + p_tr + p_h) * 250 # 假設平均實收
+    total_cost = (n_t * cost_team) + (n_tr * cost_train) + (n_h * cost_hobby)
+    balance = total_income - total_cost
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("預計總收入", f"${total_income:,}")
+    m2.metric("預計總支出", f"${total_cost:,}")
+    m3.metric("預計收支盈餘", f"${balance:,}", delta=float(balance))
