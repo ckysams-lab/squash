@@ -264,7 +264,6 @@ elif menu == "📝 考勤點名":
                 for i, row in enumerate(current_players.to_dict('records')):
                     name = str(row['姓名'])
                     with cols[i % 4]:
-                        # 非管理員禁用勾選框
                         attendance_dict[name] = st.checkbox(
                             f"{name}", 
                             value=(name in existing_list), 
@@ -272,7 +271,6 @@ elif menu == "📝 考勤點名":
                             disabled=not st.session_state.is_admin
                         )
                 
-                # 只有管理員看得到儲存按鈕
                 if st.session_state.is_admin:
                     if st.button("💾 儲存點名", type="primary"):
                         present_names = [n for n, p in attendance_dict.items() if p]
@@ -294,7 +292,48 @@ elif menu == "📝 考勤點名":
                 st.info("該班別尚無名單數據。")
 
         with tab2:
-            st.dataframe(st.session_state.attendance_records[st.session_state.attendance_records["班級"] == sel_class], use_container_width=True)
+            st.markdown(f"### 📊 {sel_class} 考勤總表")
+            # 獲取該班級的所有點名紀錄
+            class_records = st.session_state.attendance_records[st.session_state.attendance_records["班級"] == sel_class]
+            # 獲取該班級的所有學生名單
+            class_players = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class]
+            
+            if class_players.empty:
+                st.info("尚無學生名單數據。")
+            elif class_records.empty:
+                st.info("尚無考勤紀錄。")
+            else:
+                # 建立考勤矩陣
+                # 橫向：日期（由日程表獲取所有日期以確保排序正確且完整）
+                report_dates = all_dates
+                # 縱向：學生姓名
+                student_names = class_players["姓名"].unique().tolist()
+                
+                # 初始化矩陣數據
+                matrix_data = []
+                for name in student_names:
+                    row_data = {"學生姓名": name}
+                    for date in report_dates:
+                        # 檢查該日期、該學生是否在出席名單中
+                        daily_rec = class_records[class_records["日期"] == date]
+                        if not daily_rec.empty:
+                            present_list = str(daily_rec.iloc[0]["出席名單"]).split(", ")
+                            row_data[date] = "✅" if name in present_list else "✘"
+                        else:
+                            row_data[date] = "-" # 尚未點名
+                    matrix_data.append(row_data)
+                
+                report_df = pd.DataFrame(matrix_data)
+                st.dataframe(report_df.set_index("學生姓名"), use_container_width=True)
+                
+                # 導出報表功能
+                csv = report_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 下載考勤報表 (CSV)",
+                    data=csv,
+                    file_name=f"{sel_class}_attendance_report.csv",
+                    mime="text/csv",
+                )
 
 elif menu == "📢 活動公告":
     st.title("📢 賽事及活動公告")
