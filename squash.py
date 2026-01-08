@@ -185,7 +185,7 @@ if 'schedule_df' not in st.session_state or force_refresh:
 if 'class_players_df' not in st.session_state or force_refresh:
     st.session_state.class_players_df = load_cloud_data('class_players', [])
 if 'rank_df' not in st.session_state or force_refresh:
-    st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["班級", "姓名", "積分", "章別"]))
+    st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["年級", "班級", "姓名", "積分", "章別"]))
 if 'attendance_records' not in st.session_state or force_refresh:
     st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
 if 'announcements_df' not in st.session_state or force_refresh:
@@ -231,7 +231,8 @@ elif menu == "🏆 隊員排行榜":
                 if st.button("🔄 從壁球班名單同步所有學生", help="將點名系統中的學生自動加入排行榜"):
                     if not st.session_state.class_players_df.empty:
                         df_r = st.session_state.rank_df
-                        for col in ["班級", "姓名", "積分", "章別"]:
+                        # 確保欄位存在
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
                         count_added = 0
@@ -239,6 +240,7 @@ elif menu == "🏆 隊員排行榜":
                             exists = ((df_r["姓名"] == p_row["姓名"]) & (df_r["班級"] == p_row["班級"])).any()
                             if not exists:
                                 new_entry = pd.DataFrame([{
+                                    "年級": p_row.get("年級", "-"),
                                     "班級": p_row["班級"],
                                     "姓名": p_row["姓名"],
                                     "積分": 100,
@@ -252,7 +254,7 @@ elif menu == "🏆 隊員排行榜":
                         st.success(f"同步完成！新增了 {count_added} 位學生。")
                         st.rerun()
 
-                u_rank = st.file_uploader("匯入積分榜 Excel (需包含: 班級, 姓名, 積分)", type=["xlsx"])
+                u_rank = st.file_uploader("匯入積分榜 Excel (需包含: 年級, 班級, 姓名, 積分)", type=["xlsx"])
                 if u_rank:
                     df_r = pd.read_excel(u_rank)
                     if st.button("🚀 確認更新積分排名"):
@@ -264,10 +266,11 @@ elif menu == "🏆 隊員排行榜":
                 with st.form("badge_award_form"):
                     b_name = st.text_input("獲章學生姓名")
                     b_class = st.text_input("班別 (如: 4A)")
+                    b_grade = st.text_input("年級 (如: P4)")
                     b_type = st.selectbox("所考獲章別", ["白金章", "金章", "銀章", "銅章"])
                     if st.form_submit_button("確認發放獎勵積分"):
                         df_r = st.session_state.rank_df
-                        for col in ["班級", "姓名", "積分", "章別"]:
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
                         mask = (df_r["姓名"] == b_name) & (df_r["班級"] == b_class)
@@ -277,8 +280,10 @@ elif menu == "🏆 隊員排行榜":
                             current_pts = pd.to_numeric(df_r.at[idx, "積分"], errors='coerce')
                             if pd.isna(current_pts): current_pts = 0
                             df_r.at[idx, "積分"] = current_pts + BADGE_AWARDS[b_type]["points"]
+                            if b_grade: df_r.at[idx, "年級"] = b_grade
                         else:
                             new_row = pd.DataFrame([{
+                                "年級": b_grade if b_grade else "-",
                                 "班級": b_class, "姓名": b_name, 
                                 "積分": 100 + BADGE_AWARDS[b_type]["points"],
                                 "章別": b_type
@@ -296,7 +301,7 @@ elif menu == "🏆 隊員排行榜":
                     m_points = st.number_input("調整分數 (加分輸入正數，扣分輸入負數)", value=10, step=1)
                     if st.form_submit_button("執行分數調整"):
                         df_r = st.session_state.rank_df
-                        for col in ["班級", "姓名", "積分", "章別"]:
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
                         mask = (df_r["姓名"] == m_name) & (df_r["班級"] == m_class)
@@ -316,7 +321,6 @@ elif menu == "🏆 隊員排行榜":
                 if not st.session_state.rank_df.empty:
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 整理並排序後匯出
                         export_df = st.session_state.rank_df.copy()
                         export_df["積分"] = pd.to_numeric(export_df["積分"], errors='coerce').fillna(0).astype(int)
                         export_df = export_df.sort_values(by="積分", ascending=False)
@@ -333,10 +337,10 @@ elif menu == "🏆 隊員排行榜":
     
     if not st.session_state.rank_df.empty:
         display_rank_df = st.session_state.rank_df.copy()
-        required_cols = ["班級", "姓名", "積分", "章別"]
+        required_cols = ["年級", "班級", "姓名", "積分", "章別"]
         for col in required_cols:
             if col not in display_rank_df.columns:
-                display_rank_df[col] = 0 if col == "積分" else "無"
+                display_rank_df[col] = 0 if col == "積分" else "-"
 
         display_rank_df["積分"] = pd.to_numeric(display_rank_df["積分"], errors='coerce').fillna(0).astype(int)
         display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
@@ -350,7 +354,8 @@ elif menu == "🏆 隊員排行榜":
         display_rank_df.reset_index(drop=True, inplace=True)
         display_rank_df.index = np.arange(1, len(display_rank_df) + 1)
         
-        cols_to_show = ["班級", "姓名", "積分", "榮譽勳章"]
+        # 顯示包含「年級」的表格
+        cols_to_show = ["年級", "班級", "姓名", "積分", "榮譽勳章"]
         st.table(display_rank_df[cols_to_show])
     else:
         st.info("暫無積分數據。")
