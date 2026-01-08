@@ -186,8 +186,8 @@ if 'tournaments_df' not in st.session_state or force_refresh:
 if 'awards_df' not in st.session_state or force_refresh:
     st.session_state.awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
 
-# 菜單導航
-menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "🏅 學生得獎紀錄", "📈 個人技術分析", "📢 活動公告", "🗓️ 比賽報名與賽程"]
+# 菜單導航 (刪除「📈 個人技術分析」)
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "🏅 學生得獎紀錄", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
     menu_options.append("💰 學費與預算核算")
 menu = st.sidebar.radio("功能選單", menu_options)
@@ -222,7 +222,7 @@ elif menu == "🏆 隊員排行榜":
     
     if not st.session_state.rank_df.empty:
         display_rank_df = st.session_state.rank_df.copy()
-        # 修正：將積分從大至小排序
+        # 將積分從大至小排序
         if "積分" in display_rank_df.columns:
             display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
         
@@ -405,37 +405,6 @@ elif menu == "🏅 學生得獎紀錄":
                     st.rerun()
     else:
         st.info("目前尚無得獎紀錄。")
-
-elif menu == "📈 個人技術分析":
-    st.title("📈 學生個人技術評級")
-    st.info("透過五大維度分析，追蹤學生的技術成長軌跡。")
-    
-    if st.session_state.is_admin:
-        if st.session_state.class_players_df.empty:
-            st.warning("請先匯入學生名單。")
-        else:
-            with st.expander("📝 評定學生表現"):
-                with st.form("skill_form"):
-                    target_student = st.selectbox("選擇學生", st.session_state.class_players_df["姓名"].unique())
-                    c1, c2, c3 = st.columns(3)
-                    s1 = c1.slider("發球 (Service)", 1, 10, 5)
-                    s2 = c2.slider("直線球 (Drive)", 1, 10, 5)
-                    s3 = c3.slider("長球 (Lob)", 1, 10, 5)
-                    s4 = c1.slider("截擊 (Volley)", 1, 10, 5)
-                    s5 = c2.slider("體能 (Fitness)", 1, 10, 5)
-                    if st.form_submit_button("儲存評級"):
-                        st.success(f"已更新 {target_student} 的技術指標！")
-    
-    st.subheader("📊 技術雷達圖")
-    import plotly.express as px
-    
-    df_radar = pd.DataFrame(dict(
-        r=[7, 6, 8, 5, 7],
-        theta=['發球','直線球','長球','截擊','體能']
-    ))
-    fig = px.line_polar(df_radar, r='r', theta='theta', line_close=True)
-    fig.update_traces(fill='toself')
-    st.plotly_chart(fig, use_container_width=True)
 
 elif menu == "📢 活動公告":
     st.title("📢 賽事及活動公告")
