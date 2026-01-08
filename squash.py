@@ -185,7 +185,6 @@ if 'schedule_df' not in st.session_state or force_refresh:
 if 'class_players_df' not in st.session_state or force_refresh:
     st.session_state.class_players_df = load_cloud_data('class_players', [])
 if 'rank_df' not in st.session_state or force_refresh:
-    # 預設增加「章別」欄位避免 KeyError
     st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["班級", "姓名", "積分", "章別"]))
 if 'attendance_records' not in st.session_state or force_refresh:
     st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
@@ -225,20 +224,18 @@ elif menu == "🏆 隊員排行榜":
     
     if st.session_state.is_admin:
         with st.expander("🛠️ 排行榜管理"):
-            tab_upload, tab_badge, tab_manual = st.tabs(["📤 批量匯入", "🥇 章別獎勵登記", "✏️ 手動調整分數"])
+            tab_upload, tab_badge, tab_manual, tab_export = st.tabs(["📤 批量匯入/同步", "🥇 章別獎勵登記", "✏️ 手動調整分數", "📥 匯出排行榜"])
             
             with tab_upload:
-                st.write("您可以手動匯入 Excel 或從「學生名單」自動同步。")
+                st.write("您可以從「學生名單」自動同步或手動匯入 Excel。")
                 if st.button("🔄 從壁球班名單同步所有學生", help="將點名系統中的學生自動加入排行榜"):
                     if not st.session_state.class_players_df.empty:
                         df_r = st.session_state.rank_df
-                        # 補齊欄位
                         for col in ["班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
                         count_added = 0
                         for _, p_row in st.session_state.class_players_df.iterrows():
-                            # 檢查是否已在榜中
                             exists = ((df_r["姓名"] == p_row["姓名"]) & (df_r["班級"] == p_row["班級"])).any()
                             if not exists:
                                 new_entry = pd.DataFrame([{
@@ -254,8 +251,6 @@ elif menu == "🏆 隊員排行榜":
                         save_cloud_data('rankings', df_r)
                         st.success(f"同步完成！新增了 {count_added} 位學生。")
                         st.rerun()
-                    else:
-                        st.error("請先在『考勤點名』頁面匯入學生名單。")
 
                 u_rank = st.file_uploader("匯入積分榜 Excel (需包含: 班級, 姓名, 積分)", type=["xlsx"])
                 if u_rank:
@@ -314,7 +309,27 @@ elif menu == "🏆 隊員排行榜":
                             st.success(f"已調整 {m_name} 的分數 ({old_pts} -> {old_pts + m_points})")
                             st.rerun()
                         else:
-                            st.error("找不到該學生，請確認姓名及班別是否正確，或先進行同步。")
+                            st.error("找不到該學生，請確認姓名及班別是否正確。")
+
+            with tab_export:
+                st.write("將目前的排行榜內容匯出為 Excel 檔案以供存檔或列印。")
+                if not st.session_state.rank_df.empty:
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # 整理並排序後匯出
+                        export_df = st.session_state.rank_df.copy()
+                        export_df["積分"] = pd.to_numeric(export_df["積分"], errors='coerce').fillna(0).astype(int)
+                        export_df = export_df.sort_values(by="積分", ascending=False)
+                        export_df.to_excel(writer, index=False, sheet_name='積分榜')
+                    
+                    st.download_button(
+                        label="📥 下載積分排行榜 (Excel)",
+                        data=output.getvalue(),
+                        file_name=f"squash_ranking_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.info("目前無數據可供匯出。")
     
     if not st.session_state.rank_df.empty:
         display_rank_df = st.session_state.rank_df.copy()
