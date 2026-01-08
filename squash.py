@@ -181,21 +181,20 @@ if st.sidebar.button("🔌 登出系統"):
     st.session_state.is_admin = False
     st.rerun()
 
-# --- 6. 數據加載 ---
-force_refresh = st.sidebar.button("🔄 刷新雲端數據")
-if 'schedule_df' not in st.session_state or force_refresh:
+# --- 6. 數據加載 (移除刷新按鈕，改為直接檢查載入) ---
+if 'schedule_df' not in st.session_state:
     st.session_state.schedule_df = load_cloud_data('schedules', [])
-if 'class_players_df' not in st.session_state or force_refresh:
+if 'class_players_df' not in st.session_state:
     st.session_state.class_players_df = load_cloud_data('class_players', [])
-if 'rank_df' not in st.session_state or force_refresh:
+if 'rank_df' not in st.session_state:
     st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["年級", "班級", "姓名", "積分", "章別"]))
-if 'attendance_records' not in st.session_state or force_refresh:
+if 'attendance_records' not in st.session_state:
     st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
-if 'announcements_df' not in st.session_state or force_refresh:
+if 'announcements_df' not in st.session_state:
     st.session_state.announcements_df = load_cloud_data('announcements', pd.DataFrame(columns=["標題", "內容", "日期"]))
-if 'tournaments_df' not in st.session_state or force_refresh:
+if 'tournaments_df' not in st.session_state:
     st.session_state.tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
-if 'awards_df' not in st.session_state or force_refresh:
+if 'awards_df' not in st.session_state:
     st.session_state.awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
 
 # 菜單導航
