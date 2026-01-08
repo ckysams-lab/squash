@@ -123,15 +123,6 @@ if 'is_admin' not in st.session_state:
 if 'user_id' not in st.session_state:
     st.session_state.user_id = ""
 
-# 香港壁球總會章別獎勵設定
-BADGE_AWARDS = {
-    "白金章": {"points": 400, "icon": "💎"},
-    "金章": {"points": 200, "icon": "🥇"},
-    "銀章": {"points": 100, "icon": "🥈"},
-    "銅章": {"points": 50, "icon": "🥉"},
-    "無": {"points": 0, "icon": ""}
-}
-
 # --- 5. 側邊欄與登入邏輯 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
 
@@ -185,7 +176,7 @@ if 'schedule_df' not in st.session_state or force_refresh:
 if 'class_players_df' not in st.session_state or force_refresh:
     st.session_state.class_players_df = load_cloud_data('class_players', [])
 if 'rank_df' not in st.session_state or force_refresh:
-    st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["班級", "姓名", "積分", "章別"]))
+    st.session_state.rank_df = load_cloud_data('rankings', [])
 if 'attendance_records' not in st.session_state or force_refresh:
     st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
 if 'announcements_df' not in st.session_state or force_refresh:
@@ -195,7 +186,7 @@ if 'tournaments_df' not in st.session_state or force_refresh:
 if 'awards_df' not in st.session_state or force_refresh:
     st.session_state.awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
 
-# 菜單導航
+# 菜單導航 (刪除「📈 個人技術分析」)
 menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "🏅 學生得獎紀錄", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
     menu_options.append("💰 學費與預算核算")
@@ -220,66 +211,24 @@ if menu == "📅 訓練日程表":
 
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
-    st.info("💡 考取香港壁球總會章別獎勵：白金(+400), 金(+200), 銀(+100), 銅(+50)")
-    
     if st.session_state.is_admin:
-        with st.expander("🛠️ 排行榜管理"):
-            tab_upload, tab_badge = st.tabs(["📤 批量匯入", "🥇 章別登記"])
-            
-            with tab_upload:
-                u_rank = st.file_uploader("匯入積分榜 Excel (欄位: 班級, 姓名, 積分, 章別)", type=["xlsx"])
-                if u_rank:
-                    df_r = pd.read_excel(u_rank)
-                    if st.button("🚀 更新積分排名"):
-                        st.session_state.rank_df = df_r
-                        save_cloud_data('rankings', df_r)
-                        st.rerun()
-            
-            with tab_badge:
-                with st.form("badge_award_form"):
-                    b_name = st.text_input("獲章學生姓名")
-                    b_class = st.text_input("班別 (如: 4A)")
-                    b_type = st.selectbox("所考獲章別", ["白金章", "金章", "銀章", "銅章"])
-                    if st.form_submit_button("確認發放獎勵積分"):
-                        df_r = st.session_state.rank_df
-                        # 查找學生，若無則新增，若有則更新章別並加分
-                        mask = (df_r["姓名"] == b_name) & (df_r["班級"] == b_class)
-                        if any(mask):
-                            idx = df_r[mask].index[0]
-                            df_r.at[idx, "章別"] = b_type
-                            df_r.at[idx, "積分"] = int(df_r.at[idx, "積分"]) + BADGE_AWARDS[b_type]["points"]
-                        else:
-                            new_row = pd.DataFrame([{
-                                "班級": b_class, 
-                                "姓名": b_name, 
-                                "積分": 100 + BADGE_AWARDS[b_type]["points"], # 底分100 + 獎勵
-                                "章別": b_type
-                            }])
-                            df_r = pd.concat([df_r, new_row], ignore_index=True)
-                        save_cloud_data('rankings', df_r)
-                        st.success(f"已登記 {b_name} 考獲 {b_type}，並獎勵 {BADGE_AWARDS[b_type]['points']} 分！")
-                        st.rerun()
+        u_rank = st.file_uploader("匯入積分榜 Excel", type=["xlsx"])
+        if u_rank:
+            df_r = pd.read_excel(u_rank)
+            if st.button("🚀 更新積分排名"):
+                st.session_state.rank_df = df_r
+                save_cloud_data('rankings', df_r)
+                st.rerun()
     
     if not st.session_state.rank_df.empty:
         display_rank_df = st.session_state.rank_df.copy()
-        # 確保積分為數字
+        # 將積分從大至小排序
         if "積分" in display_rank_df.columns:
-            display_rank_df["積分"] = pd.to_numeric(display_rank_df["積分"], errors='coerce').fillna(0)
             display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
         
-        # 處理視覺圖標
-        def get_rank_ui(row):
-            badge = str(row.get("章別", "無"))
-            icon = BADGE_AWARDS.get(badge, {"icon": ""})["icon"]
-            return f"{icon} {badge}" if badge != "無" else "-"
-
-        display_rank_df["榮譽勳章"] = display_rank_df.apply(get_rank_ui, axis=1)
         display_rank_df.reset_index(drop=True, inplace=True)
         display_rank_df.index = np.arange(1, len(display_rank_df) + 1)
-        
-        # 顯示表格，排在最前面的欄位更有視覺衝擊
-        cols_to_show = ["班級", "姓名", "積分", "榮譽勳章"]
-        st.table(display_rank_df[cols_to_show])
+        st.table(display_rank_df)
     else:
         st.info("暫無積分數據。")
 
