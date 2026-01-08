@@ -227,8 +227,8 @@ elif menu == "🏆 隊員排行榜":
             tab_upload, tab_badge, tab_manual, tab_export = st.tabs(["📤 批量匯入/同步", "🥇 章別獎勵登記", "✏️ 手動調整分數", "📥 匯出排行榜"])
             
             with tab_upload:
-                st.write("您可以從「學生名單」自動同步或手動匯入 Excel。")
-                if st.button("🔄 從壁球班名單同步所有學生", help="將點名系統中的學生自動加入排行榜"):
+                st.write("您可以從「學生名單」自動同步或手動匯入 Excel。系統會自動排除重複報名的學生。")
+                if st.button("🔄 從壁球班名單同步所有學生", help="將點名系統中的學生自動加入排行榜，並自動過濾重複"):
                     if not st.session_state.class_players_df.empty:
                         df_r = st.session_state.rank_df
                         # 確保欄位存在
@@ -237,6 +237,8 @@ elif menu == "🏆 隊員排行榜":
                         
                         count_added = 0
                         for _, p_row in st.session_state.class_players_df.iterrows():
+                            # 同時比對姓名與班級，避免同名同姓或是重複報名
+                            # 如果報多於一班，只要姓名和年級/班級相同就視為同一人
                             exists = ((df_r["姓名"] == p_row["姓名"]) & (df_r["班級"] == p_row["班級"])).any()
                             if not exists:
                                 new_entry = pd.DataFrame([{
@@ -251,7 +253,7 @@ elif menu == "🏆 隊員排行榜":
                         
                         st.session_state.rank_df = df_r
                         save_cloud_data('rankings', df_r)
-                        st.success(f"同步完成！新增了 {count_added} 位學生。")
+                        st.success(f"同步完成！新增了 {count_added} 位新學生。")
                         st.rerun()
 
                 u_rank = st.file_uploader("匯入積分榜 Excel (需包含: 年級, 班級, 姓名, 積分)", type=["xlsx"])
@@ -322,6 +324,8 @@ elif menu == "🏆 隊員排行榜":
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         export_df = st.session_state.rank_df.copy()
+                        # 匯出前也做一次重複排除
+                        export_df = export_df.drop_duplicates(subset=["年級", "姓名"], keep='first')
                         export_df["積分"] = pd.to_numeric(export_df["積分"], errors='coerce').fillna(0).astype(int)
                         export_df = export_df.sort_values(by="積分", ascending=False)
                         export_df.to_excel(writer, index=False, sheet_name='積分榜')
@@ -336,11 +340,15 @@ elif menu == "🏆 隊員排行榜":
                     st.info("目前無數據可供匯出。")
     
     if not st.session_state.rank_df.empty:
+        # 顯示時自動合併「姓名」與「年級」相同的資料
         display_rank_df = st.session_state.rank_df.copy()
         required_cols = ["年級", "班級", "姓名", "積分", "章別"]
         for col in required_cols:
             if col not in display_rank_df.columns:
                 display_rank_df[col] = 0 if col == "積分" else "-"
+
+        # 自動合併重複學生（姓名+年級）
+        display_rank_df = display_rank_df.drop_duplicates(subset=["年級", "姓名"], keep='first')
 
         display_rank_df["積分"] = pd.to_numeric(display_rank_df["積分"], errors='coerce').fillna(0).astype(int)
         display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
