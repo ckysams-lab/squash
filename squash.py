@@ -240,12 +240,12 @@ elif menu == "🏆 隊員排行榜":
                         count_added = 0
                         for _, p_row in st.session_state.class_players_df.iterrows():
                             # 同時比對姓名與年級，防止重複
-                            exists = ((df_r["姓名"] == p_row["姓名"]) & (df_r["年級"] == p_row.get("年級", "-"))).any()
+                            exists = ((df_r["姓名"].astype(str).str.strip() == str(p_row["姓名"]).strip()) & (df_r["年級"].astype(str).str.strip() == str(p_row.get("年級", "-")).strip())).any()
                             if not exists:
                                 new_entry = pd.DataFrame([{
-                                    "年級": p_row.get("年級", "-"),
-                                    "班級": p_row["班級"],
-                                    "姓名": p_row["姓名"],
+                                    "年級": str(p_row.get("年級", "-")).strip(),
+                                    "班級": str(p_row["班級"]).strip(),
+                                    "姓名": str(p_row["姓名"]).strip(),
                                     "積分": 100,
                                     "章別": "無"
                                 }])
@@ -267,17 +267,17 @@ elif menu == "🏆 隊員排行榜":
             
             with tab_badge:
                 with st.form("badge_award_form"):
-                    b_name = st.text_input("獲章學生姓名")
-                    b_grade = st.text_input("年級 (如: P4)")
-                    b_class = st.text_input("班別 (如: 4A)")
+                    b_name = st.text_input("獲章學生姓名").strip()
+                    b_grade = st.text_input("年級 (如: P4)").strip()
+                    b_class = st.text_input("班別 (如: 4A)").strip()
                     b_type = st.selectbox("所考獲章別", ["白金章", "金章", "銀章", "銅章"])
                     if st.form_submit_button("確認發放獎勵積分"):
                         df_r = st.session_state.rank_df.copy()
                         for col in ["年級", "班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
-                        # 查找學生 (優先比對姓名+年級)
-                        mask = (df_r["姓名"] == b_name) & (df_r["年級"] == b_grade)
+                        # 查找學生 (嚴格對比字串並去除空格)
+                        mask = (df_r["姓名"].astype(str).str.strip() == b_name) & (df_r["年級"].astype(str).str.strip() == b_grade)
                         if any(mask):
                             idx = df_r[mask].index[0]
                             df_r.at[idx, "章別"] = b_type
@@ -297,23 +297,23 @@ elif menu == "🏆 隊員排行榜":
                             }])
                             df_r = pd.concat([df_r, new_row], ignore_index=True)
                         
-                        # 重要：更新 session 並保存
+                        # 更新並同步
                         st.session_state.rank_df = df_r
                         save_cloud_data('rankings', df_r)
-                        st.success(f"已登記 {b_name} 的 {b_type} 分數。")
+                        st.success(f"已更新 {b_name} 的章別及積分。")
                         st.rerun()
 
             with tab_manual:
                 with st.form("manual_adjust_form"):
-                    m_name = st.text_input("學生姓名")
-                    m_grade = st.text_input("年級")
+                    m_name = st.text_input("學生姓名").strip()
+                    m_grade = st.text_input("年級").strip()
                     m_points = st.number_input("調整分數 (加分輸入正數，扣分輸入負數)", value=10, step=1)
                     if st.form_submit_button("執行分數調整"):
                         df_r = st.session_state.rank_df.copy()
                         for col in ["年級", "班級", "姓名", "積分", "章別"]:
                             if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
                         
-                        mask = (df_r["姓名"] == m_name) & (df_r["年級"] == m_grade)
+                        mask = (df_r["姓名"].astype(str).str.strip() == m_name) & (df_r["年級"].astype(str).str.strip() == m_grade)
                         if any(mask):
                             idx = df_r[mask].index[0]
                             old_pts = pd.to_numeric(df_r.at[idx, "積分"], errors='coerce')
@@ -354,6 +354,8 @@ elif menu == "🏆 隊員排行榜":
                 display_rank_df[col] = 0 if col == "積分" else "-"
 
         # 自動合併重複學生（姓名+年級）
+        display_rank_df["姓名"] = display_rank_df["姓名"].astype(str).str.strip()
+        display_rank_df["年級"] = display_rank_df["年級"].astype(str).str.strip()
         display_rank_df = display_rank_df.drop_duplicates(subset=["年級", "姓名"], keep='first')
         display_rank_df["積分"] = pd.to_numeric(display_rank_df["積分"], errors='coerce').fillna(0).astype(int)
         display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
@@ -579,7 +581,7 @@ elif menu == "🗓️ 比賽報名與賽程":
                 t_date = c1.date_input("比賽日期")
                 t_due = c2.date_input("報名截止")
                 t_link = st.text_input("連結")
-                t_note = t_note = st.text_area("備註")
+                t_note = st.text_area("備註")
                 if st.form_submit_button("發布賽事"):
                     new_t = pd.DataFrame([{"比賽名稱": t_name, "日期": str(t_date), "截止日期": str(t_due), "連結": t_link, "備註": t_note}])
                     st.session_state.tournaments_df = pd.concat([st.session_state.tournaments_df, new_t], ignore_index=True)
