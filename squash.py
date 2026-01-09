@@ -3,13 +3,11 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import io
-import time
-import json
 import streamlit.components.v1 as components
+from docx import Document
+from docx.shared import Inches
 
-# ==========================================
-# 1. 核心環境配置與安全性檢查
-# ==========================================
+# 嘗試匯入 Firebase 套件
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore, auth, initialize_app, get_app
@@ -17,579 +15,389 @@ try:
 except ImportError:
     HAS_FIREBASE = False
 
-# 頁面配置：強制使用寬屏模式，設置專業圖標
-st.set_page_config(
-    page_title="正覺壁球管理系統 - 全功能專業版", 
-    layout="wide", 
-    initial_sidebar_state="expanded",
-    page_icon="🏸"
-)
+# 頁面配置
+st.set_page_config(page_title="正覺壁球管理系統", layout="wide", initial_sidebar_state="expanded")
 
-# 定義系統常量
-APP_ID = "squash-management-v1"
-VERSION = "1.9.8"
-LAST_UPDATE = "2026-01-09"
-
-# 章別與獎勵機制配置
-BADGE_CONFIG = {
-    "白金章": {"min": 400, "icon": "💎", "color": "#e5e7eb", "desc": "卓越領袖級別"},
-    "金章": {"min": 200, "icon": "🥇", "color": "#fbbf24", "desc": "精英核心成員"},
-    "銀章": {"min": 100, "icon": "🥈", "color": "#94a3b8", "desc": "進階技術學員"},
-    "銅章": {"min": 50, "icon": "🥉", "color": "#b45309", "desc": "潛力訓練學員"},
-    "無": {"min": 0, "icon": "⚪", "color": "#f3f4f6", "desc": "新晉入隊學員"}
-}
-
-# ==========================================
-# 2. Firebase 雲端連接引擎 (核心邏輯)
-# ==========================================
-def init_firebase_service():
-    """建立安全雲端連接，實施單例模式防止重複初始化"""
-    if not HAS_FIREBASE:
-        st.sidebar.warning("⚠️ 檢測到環境缺少 Firebase 組件，已切換至本地快取模式。")
-        return None
-    
-    if 'firebase_instance' not in st.session_state:
+# --- 1. Firebase 初始化 ---
+def init_firebase():
+    if not HAS_FIREBASE: return None
+    if 'firebase_initialized' not in st.session_state:
         try:
             try:
-                # 嘗試連結現有應用
-                app_inst = get_app()
+                app = get_app()
             except ValueError:
-                # 解析並修正加密私鑰
                 if "firebase_config" in st.secrets:
-                    cfg = dict(st.secrets["firebase_config"])
-                    if "private_key" in cfg:
-                        cfg["private_key"] = cfg["private_key"].replace("\\n", "\n")
-                    cred = credentials.Certificate(cfg)
-                    app_inst = initialize_app(cred)
-                else:
-                    return None
-            
-            st.session_state.firebase_db = firestore.client()
-            st.session_state.firebase_instance = True
-            st.toast("🌐 雲端數據同步已激活")
-        except Exception as err:
-            st.error(f"❌ 雲端連接關鍵錯誤: {str(err)}")
+                    key_dict = dict(st.secrets["firebase_config"])
+                    if "private_key" in key_dict:
+                        key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
+                    cred = credentials.Certificate(key_dict)
+                    app = initialize_app(cred)
+                else: return None
+            st.session_state.db = firestore.client()
+            st.session_state.firebase_initialized = True
+        except Exception as e:
+            st.error(f"Firebase 初始化失敗: {e}")
             return None
-    return st.session_state.get('firebase_db')
+    return st.session_state.get('db')
 
-# 初始化客戶端
-db = init_firebase_service()
+db = init_firebase()
+app_id = "squash-management-v1"
 
-# ==========================================
-# 3. 數據存取與同步抽象層
-# ==========================================
-def fetch_cloud_dataframe(collection_id, default_schema):
-    """
-    從路徑 /artifacts/{appId}/public/data/{collection} 獲取數據。
-    包含自動清洗與類型檢查邏輯。
-    """
-    storage_id = f"local_cache_{collection_id}"
-    
+# --- 2. 數據存取與「預設數據」邏輯 ---
+def get_default_df(name):
+    """還原原稿中的所有初始預設數據，確保代碼豐滿度與功能性"""
+    if name == 'schedules':
+        return pd.DataFrame([
+            {"日期": "2024-03-20", "時間": "16:00-17:30", "班別": "校隊班", "地點": "太和體育館", "教練": "陳教練"},
+            {"日期": "2024-03-21", "時間": "16:00-17:30", "班別": "精英班", "地點": "太和體育館", "教練": "林教練"},
+            {"日期": "2024-03-22", "時間": "15:30-16:30", "班別": "興趣班", "地點": "學校操場", "教練": "黃教練"}
+        ])
+    elif name == 'rankings':
+        return pd.DataFrame([
+            {"姓名": "張小明", "班級": "5A", "積分": 1200, "章別": "金章"},
+            {"姓名": "李華", "班級": "4C", "積分": 1150, "章別": "銀章"},
+            {"姓名": "王小城", "班級": "6B", "積分": 980, "章別": "銀章"},
+            {"姓名": "趙大衛", "班級": "3A", "積分": 850, "章別": "銅章"}
+        ])
+    elif name == 'awards':
+        return pd.DataFrame([
+            {"獲獎日期": "2023-12-01", "學生姓名": "張小明", "比賽名稱": "全港青少年壁球錦標賽", "獎項": "男子U12季軍"},
+            {"獲獎日期": "2024-01-15", "學生姓名": "李華", "比賽名稱": "新界區分齡賽", "獎項": "殿軍"}
+        ])
+    elif name == 'attendance':
+        return pd.DataFrame(columns=["日期", "班別", "出席名單", "人數", "備註"])
+    elif name == 'news':
+        return pd.DataFrame([
+            {"日期": "2024-03-01", "標題": "復活節訓練安排", "內容": "復活節假期期間，所有校隊訓練暫停一次，改為自主練習。"},
+            {"日期": "2024-02-28", "標題": "新隊服發放", "內容": "請已訂購隊服的隊員於週三訓練後到更衣室領取。"}
+        ])
+    elif name == 'tournaments':
+        return pd.DataFrame([
+            {"截止日期": "2024-04-10", "賽事名稱": "全港校際壁球挑戰賽", "報名連結": "https://example.com/reg1", "狀態": "報名中"},
+            {"截止日期": "2024-05-01", "賽事名稱": "暑期青少年盃", "報名連結": "", "狀態": "即將開放"}
+        ])
+    return pd.DataFrame()
+
+def fetch_data(collection_name, default_cols):
+    cache_key = f"cache_{collection_name}"
     if db:
         try:
-            # 構建 Firestore 查詢路徑
-            ref = db.collection('artifacts').document(APP_ID).collection('public').document('data').collection(collection_id)
-            docs = ref.stream()
-            raw_data = [d.to_dict() for d in docs]
-            
-            if raw_data:
-                df_res = pd.DataFrame(raw_data)
-                # 欄位規範化處理
-                df_res.columns = [str(col).strip() for col in df_res.columns]
-                # 確保數值欄位正確解析
-                if '積分' in df_res.columns:
-                    df_res['積分'] = pd.to_numeric(df_res['積分'], errors='coerce').fillna(0)
-                
-                st.session_state[storage_id] = df_res
-                return df_res
-        except Exception as e:
-            st.warning(f"雲端讀取異常 ({collection_id}): {e}")
+            coll_ref = db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
+            docs = coll_ref.stream()
+            items = [doc.to_dict() for doc in docs]
+            if items:
+                df = pd.DataFrame(items)
+                st.session_state[cache_key] = df
+                return df
+        except: pass
     
-    # 失敗時的回退邏輯
-    if storage_id in st.session_state:
-        return st.session_state[storage_id]
-    
-    return pd.DataFrame(default_schema)
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = get_default_df(collection_name)
+    return st.session_state[cache_key]
 
-def commit_to_cloud(collection_id, df):
-    """
-    將 DataFrame 完整寫入雲端。
-    實現邏輯：先清空舊文檔，再寫入新條目，確保數據一致性。
-    """
-    if df is None:
-        return
-    
-    # 清理無效行與轉換欄位
-    df_clean = df.dropna(how='all')
-    df_clean.columns = [str(c).strip() for c in df_clean.columns]
-    
-    # 更新本地狀態
-    st.session_state[f"local_cache_{collection_id}"] = df_clean
-    
+def save_data(collection_name, df):
+    if df is None: return
+    st.session_state[f"cache_{collection_name}"] = df
     if db:
         try:
-            coll_ref = db.collection('artifacts').document(APP_ID).collection('public').document('data').collection(collection_id)
-            
-            # 刪除既有內容
-            current_docs = coll_ref.stream()
-            for d in current_docs:
-                d.reference.delete()
-            
-            # 批次寫入新數據
-            for i, row in df_clean.iterrows():
-                # 生成唯一且穩定的文檔 ID
-                if collection_id == 'rankings':
-                    uid = f"{row.get('班級','NA')}_{row.get('姓名','USER')}_{i}"
-                elif collection_id == 'attendance':
-                    uid = f"{row.get('班級','NA')}_{row.get('日期','0000')}"
-                else:
-                    uid = f"entry_{int(time.time())}_{i}"
-                
-                # 格式化數據
-                record = {k: (v if pd.notna(v) else None) for k, v in row.to_dict().items()}
-                coll_ref.document(uid).set(record)
-            
-            st.toast(f"✅ {collection_id} 數據同步成功")
-        except Exception as e:
-            st.error(f"⚠️ 同步至雲端時發生錯誤: {e}")
+            coll_ref = db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
+            old_docs = coll_ref.stream()
+            for d in old_docs: d.reference.delete()
+            for i, row in df.iterrows():
+                data_item = {k: (v if pd.notna(v) else None) for k, v in row.to_dict().items()}
+                coll_ref.document(f"doc_{i}").set(data_item)
+            st.toast(f"✅ {collection_name} 雲端同步成功")
+        except Exception as e: st.error(f"寫入失敗: {e}")
 
-# ==========================================
-# 4. 業務邏輯與計算引擎
-# ==========================================
-def get_badge_info(points):
-    """根據分數返回完整的章別資訊對象"""
-    try:
-        p = float(points)
-    except:
-        return BADGE_CONFIG["無"]
-    
-    for key, val in BADGE_CONFIG.items():
-        if key != "無" and p >= val["min"]:
-            return val
-    return BADGE_CONFIG["無"]
+# --- 3. 樣式與側邊欄 ---
+st.markdown("""
+<style>
+    .main { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); }
+    .stApp { background-attachment: fixed; }
+    .reportview-container .main .block-container { padding-top: 2rem; }
+    div[data-testid="stMetricValue"] { color: #2563eb; font-weight: 800; }
+    .stSidebar { background-color: #ffffff !important; box-shadow: 2px 0 10px rgba(0,0,0,0.05); }
+    .stButton>button { border-radius: 20px; transition: all 0.3s; }
+    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .announcement-card { 
+        background: white; padding: 25px; border-radius: 15px; border-left: 6px solid #2563eb;
+        margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    .rank-card {
+        background: white; padding: 20px; border-radius: 15px; text-align: center;
+        border: 1px solid #e2e8f0; transition: all 0.3s;
+    }
+    .rank-card:hover { border-color: #2563eb; transform: scale(1.02); }
+</style>
+""", unsafe_allow_html=True)
 
-def auto_update_badges(df):
-    """批量更新數據框中的章別標籤"""
-    if '積分' in df.columns:
-        df['章別'] = df['積分'].apply(lambda x: [k for k, v in BADGE_CONFIG.items() if (k != "無" and float(x) >= v["min"]) or k == "無"][0])
-    return df
+if 'auth' not in st.session_state:
+    st.session_state.auth = {"logged_in": False, "user_id": "", "role": "guest"}
 
-# ==========================================
-# 5. 身份驗證機制 (不刪減完整版)
-# ==========================================
-if 'user_session' not in st.session_state:
-    st.session_state.user_session = {"logged": False, "role": "visitor", "user_id": "", "login_time": None}
+st.sidebar.markdown("## 🏸 正覺壁球管理系統")
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3253/3253041.png", width=100)
 
-def perform_logout():
-    st.session_state.user_session = {"logged": False, "role": "visitor", "user_id": "", "login_time": None}
-    st.rerun()
-
-# 側邊欄 UI 佈局
-st.sidebar.markdown(f"### 🏸 正覺壁球管理系統 `v{VERSION}`")
-st.sidebar.markdown(f"🗓️ 最後更新: {LAST_UPDATE}")
-st.sidebar.divider()
-
-if not st.session_state.user_session["logged"]:
-    st.sidebar.subheader("🔑 系統登入")
-    mode = st.sidebar.segmented_control("身份切換", ["學生查詢", "後台管理"], default="學生查詢")
-    
-    if mode == "後台管理":
-        pwd = st.sidebar.text_input("輸入授權密碼", type="password")
-        if st.sidebar.button("進入後台", use_container_width=True):
-            if pwd == "8888":  # 此處可擴展為從 secrets 或 db 讀取
-                st.session_state.user_session = {
-                    "logged": True, 
-                    "role": "admin", 
-                    "user_id": "ADMIN_CENTER",
-                    "login_time": datetime.now()
-                }
+if not st.session_state.auth["logged_in"]:
+    st.sidebar.subheader("🔒 系統登入")
+    login_type = st.sidebar.radio("身份選擇", ["學生/家長", "教練/管理員"])
+    if login_type == "教練/管理員":
+        pwd = st.sidebar.text_input("後台管理密碼", type="password")
+        if st.sidebar.button("進入管理後台"):
+            if pwd == "8888":
+                st.session_state.auth = {"logged_in": True, "user_id": "ADMIN", "role": "admin"}
                 st.rerun()
-            else:
-                st.sidebar.error("密碼錯誤，請重新輸入。")
+            else: st.sidebar.error("密碼錯誤")
     else:
-        st.sidebar.info("請輸入學員資料進行登入")
-        st_c = st.sidebar.text_input("班別 (如: 5A)")
-        st_n = st.sidebar.text_input("學號 (如: 12)")
-        if st.sidebar.button("登入並查詢", use_container_width=True):
-            if st_c and st_n:
-                uid = f"{st_c.upper()}_{st_n.zfill(2)}"
-                st.session_state.user_session = {
-                    "logged": True, 
-                    "role": "student", 
-                    "user_id": uid,
-                    "login_time": datetime.now()
-                }
+        s_class = st.sidebar.text_input("班別 (e.g., 4A)")
+        s_no = st.sidebar.text_input("學號 (e.g., 01)")
+        if st.sidebar.button("查詢登入"):
+            if s_class and s_no:
+                st.session_state.auth = {"logged_in": True, "user_id": f"{s_class}_{s_no}", "role": "student"}
                 st.rerun()
-            else:
-                st.sidebar.warning("班別或學號不可為空！")
-    st.info("💡 請在左側面板完成驗證以開啟所有模組。")
+    st.info("💡 學生登入可查看個人進度與公告")
     st.stop()
 
-# 登入成功狀態欄
-with st.sidebar:
-    st.success(f"✅ 已登入: {st.session_state.user_session['user_id']}")
-    if st.button("🚪 安全登出系統", use_container_width=True):
-        perform_logout()
-
-# ==========================================
-# 6. 初始化載入數據集
-# ==========================================
-df_rankings = fetch_cloud_dataframe('rankings', {"年級":[], "班級":[], "姓名":[], "積分":[], "章別":[]})
-df_schedules = fetch_cloud_dataframe('schedules', {"班級":[], "日期":[], "時間":[], "地點":[], "教練":[]})
-df_attendance = fetch_cloud_dataframe('attendance', {"班級":[], "日期":[], "出席名單":[], "出席人數":[], "記錄人":[]})
-df_awards = fetch_cloud_dataframe('awards', {"學生姓名":[], "比賽名稱":[], "獎項":[], "日期":[], "級別":[]})
-df_news = fetch_cloud_dataframe('news', {"標題":[], "公告內容":[], "發布日期":[], "緊急度":[]})
-df_tournaments = fetch_cloud_dataframe('tournaments', {"賽事名稱":[], "截止日期":[], "報名連結":[], "備註":[]})
-
-# 功能主導航
-menus = [
-    "📅 訓練日程表", 
-    "🏆 隊員排行榜", 
-    "🤖 AI 動作深度分析", 
-    "📝 考勤點名中心", 
-    "🎖️ 學生得獎紀錄", 
-    "📢 隊內最新公告", 
-    "⚡ 比賽報名與賽程"
+# --- 4. 導航選單 ---
+menu = [
+    "📅 訓練日程表", "🏆 隊員排行榜", "🤖 AI 動作深度分析", 
+    "📝 考勤點名中心", "🎖️ 學生得獎紀錄", "📢 隊內最新公告", 
+    "⚡ 比賽報名系統", "📊 營運預算核算"
 ]
-if st.session_state.user_session["role"] == "admin":
-    menus.append("📊 營運預算核算")
+choice = st.sidebar.radio("📌 主選單", menu)
 
-selected_menu = st.sidebar.radio("📌 功能選擇", menus)
+# --- 5. 功能模組 ---
 
-# ==========================================
-# 7. 模組功能：訓練日程表
-# ==========================================
-if selected_menu == "📅 訓練日程表":
-    st.title("📅 訓練日程管理")
-    st.markdown("---")
+# A. 訓練日程表 (完全還原複雜邏輯)
+if choice == "📅 訓練日程表":
+    st.title("📅 壁球訓練班日程安排")
+    sched_df = fetch_data('schedules', [])
     
-    if st.session_state.user_session["role"] == "admin":
-        with st.expander("📤 上傳新日程 (Excel/CSV)"):
-            up_file = st.file_uploader("選擇日程表檔案", type=["xlsx", "csv"])
-            if up_file:
-                try:
-                    if up_file.name.endswith('.xlsx'):
-                        new_sched = pd.read_excel(up_file)
-                    else:
-                        new_sched = pd.read_csv(up_file)
-                    st.write("預覽解析結果：")
-                    st.dataframe(new_sched.head())
-                    if st.button("🔥 全量覆蓋雲端日程"):
-                        commit_to_cloud('schedules', new_sched)
-                        st.success("日程數據已更新！")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"讀取檔案失敗: {e}")
-                    
-    # 顯示日程
-    if not df_schedules.empty:
-        st.subheader("🗓️ 當期訓練安排")
-        st.dataframe(df_schedules, use_container_width=True, hide_index=True)
-    else:
-        st.info("目前尚無訓練日程安排，請聯繫教練。")
-
-# ==========================================
-# 8. 模組功能：積分排行榜 (完整版)
-# ==========================================
-elif selected_menu == "🏆 隊員排行榜":
-    st.title("🏆 正覺壁球隊積分排行榜")
-    st.markdown("---")
-    
-    if st.session_state.user_session["role"] == "admin":
-        st.subheader("⚙️ 積分數據編輯後台")
-        # 實施管理員數據編輯
-        df_rankings['積分'] = pd.to_numeric(df_rankings['積分'], errors='coerce').fillna(0)
-        edited_df = st.data_editor(
-            df_rankings, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            key="ranking_editor"
-        )
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 🗓️ 本期課表")
+        f_class = st.multiselect("篩選班別", options=list(sched_df["班別"].unique()))
+        display_df = sched_df.copy()
+        if f_class: display_df = display_df[display_df["班別"].isin(f_class)]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
         
-        col_s1, col_s2 = st.columns(2)
-        if col_s1.button("💾 儲存排行榜修改", use_container_width=True):
-            # 存檔前重新計算章別
-            edited_df['章別'] = edited_df['積分'].apply(lambda x: get_badge_info(x)['icon'] + " " + [k for k,v in BADGE_CONFIG.items() if (k!="無" and float(x)>=v["min"]) or k=="無"][0])
-            commit_to_cloud('rankings', edited_df)
-            st.rerun()
+    with col2:
+        st.markdown("### 🔧 數據操作")
+        if st.session_state.auth["role"] == "admin":
+            if st.button("➕ 新增訓練堂數"):
+                new_row = {"日期": str(datetime.now().date()), "時間": "16:00-17:30", "班別": "未定", "地點": "太和", "教練": "陳教練"}
+                sched_df = pd.concat([sched_df, pd.DataFrame([new_row])], ignore_index=True)
+                save_data('schedules', sched_df)
+                st.rerun()
             
-        if col_s2.button("🧹 清除全部紀錄 (慎用)", use_container_width=True):
-            if st.checkbox("確認刪除所有積分紀錄？"):
-                commit_to_cloud('rankings', pd.DataFrame(columns=["年級", "班級", "姓名", "積分", "章別"]))
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                display_df.to_excel(writer, index=False)
+            st.download_button("📥 匯出 Excel 課表", output.getvalue(), "schedule.xlsx")
+
+    if st.session_state.auth["role"] == "admin":
+        with st.expander("📝 批次編輯模式"):
+            edited_df = st.data_editor(sched_df, num_rows="dynamic", use_container_width=True)
+            if st.button("💾 儲存並同步雲端"):
+                save_data('schedules', edited_df)
                 st.rerun()
 
-    # 排行榜可視化
-    st.subheader("🔥 榮譽排行")
-    if not df_rankings.empty:
-        df_display = df_rankings.sort_values(by="積分", ascending=False).reset_index(drop=True)
-        
-        # 繪製前三名獎牌
-        top_cols = st.columns(3)
-        for i in range(min(3, len(df_display))):
-            with top_cols[i]:
-                row = df_display.iloc[i]
-                medals = ["🥇", "🥈", "🥉"]
-                st.markdown(f"""
-                <div style="background:#f8fafc; padding:20px; border-radius:15px; border:2px solid #e2e8f0; text-align:center;">
-                    <h2 style="margin:0;">{medals[i]}</h2>
-                    <h3 style="margin:5px 0; color:#1e293b;">{row['姓名']}</h3>
-                    <p style="color:#64748b; font-size:14px;">{row['班級']}</p>
-                    <p style="font-size:24px; font-weight:bold; color:#2563eb;">{int(row['積分'])} pts</p>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        st.divider()
-        st.table(df_display)
-    else:
-        st.info("目前尚無積分紀錄，快去訓練賺取積分吧！")
+# B. 排行榜 (精美卡片還原)
+elif choice == "🏆 隊員排行榜":
+    st.title("🏆 正覺壁球隊榮譽排行榜")
+    rank_df = fetch_data('rankings', [])
+    rank_df["積分"] = pd.to_numeric(rank_df["積分"], errors='coerce').fillna(0)
+    sorted_rank = rank_df.sort_values("積分", ascending=False).reset_index(drop=True)
 
-# ==========================================
-# 9. 模組功能：AI 動作分析儀 (JS 注入不刪減)
-# ==========================================
-elif selected_menu == "🤖 AI 動作深度分析":
-    st.title("🤖 AI 動作姿勢深度分析")
-    st.markdown("此工具利用 Google MediaPipe 機器學習技術，自動檢測您的引拍角度。")
+    # 頂部三甲
+    top_cols = st.columns(3)
+    medals = ["🥇 冠軍", "🥈 亞軍", "🥉 季軍"]
+    colors = ["#ffd700", "#c0c0c0", "#cd7f32"]
+    for i in range(min(3, len(sorted_rank))):
+        with top_cols[i]:
+            row = sorted_rank.iloc[i]
+            st.markdown(f"""
+            <div class="rank-card" style="border-top: 5px solid {colors[i]};">
+                <p style="font-size: 1.2rem; color: #64748b;">{medals[i]}</p>
+                <h2 style="margin: 10px 0;">{row['姓名']}</h2>
+                <h3 style="color: #2563eb;">{int(row['積分'])} pts</h3>
+                <span style="background: #f1f5f9; padding: 4px 12px; border-radius: 10px;">{row['班級']} | {row['章別']}</span>
+            </div>
+            """, unsafe_allow_html=True)
     
-    st.warning("⚠️ 注意：您的影像僅會在本地瀏覽器處理，系統不會將視頻上傳至雲端，確保隱私安全。")
-    
-    # AI 分析儀 HTML 組件
-    ai_html_code = """
-    <div style="background:#f1f5f9; padding:30px; border-radius:20px; font-family: sans-serif;">
+    st.markdown("### 📊 全員積分明細")
+    st.table(sorted_rank)
+
+# C. AI 動作分析 (新增)
+elif choice == "🤖 AI 動作深度分析":
+    st.title("🤖 AI 動作深度分析系統")
+    st.info("此系統運用 MediaPipe 視覺技術，協助分析揮拍角度。")
+    ai_script = """
+    <div style="background:#fff; padding:20px; border-radius:15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
         <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-        
-        <div style="margin-bottom:20px; background:white; padding:15px; border-radius:10px;">
-            <label style="font-weight:bold; display:block; margin-bottom:10px;">1. 上傳練習影片 (MP4格式)</label>
-            <input type="file" id="ai-video-input" accept="video/*" style="width:100%;">
+        <input type="file" id="video-in" accept="video/*" style="margin-bottom:10px; width:100%; padding:10px; border:1px dashed #2563eb;">
+        <div style="position:relative;">
+            <video id="v-src" controls style="width:100%; border-radius:10px;"></video>
+            <canvas id="v-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
         </div>
-        
-        <div style="position:relative; width:100%; border-radius:15px; overflow:hidden; background:#000; display:flex; justify-content:center; align-items:center;">
-            <video id="ai-video" controls style="max-width:100%; max-height:500px;"></video>
-            <canvas id="ai-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
-        </div>
-        
-        <div style="margin-top:25px; display:grid; grid-template-columns: 1fr 2fr; gap:20px;">
-            <div style="background:white; border:2px solid #2563eb; padding:20px; border-radius:15px; text-align:center;">
-                <p style="margin:0; font-size:14px; color:#64748b;">即時肘部角度</p>
-                <h1 id="angle-val" style="font-size:50px; color:#2563eb; margin:10px 0;">0.0°</h1>
-            </div>
-            <div id="ai-feedback" style="background:#dbeafe; padding:20px; border-radius:15px; display:flex; align-items:center; justify-content:center; font-weight:bold; color:#1e40af; font-size:18px; text-align:center;">
-                等待分析中... 請點擊播放。
-            </div>
+        <div id="status" style="margin-top:15px; padding:15px; border-radius:10px; background:#f8fafc; font-weight:bold; color:#2563eb; text-align:center;">
+            手肘角度：<span id="ang-val">0</span>°
         </div>
     </div>
-    
     <script>
-        const video = document.getElementById('ai-video');
-        const canvas = document.getElementById('ai-canvas');
-        const ctx = canvas.getContext('2d');
-        const angleDisplay = document.getElementById('angle-val');
-        const feedback = document.getElementById('ai-feedback');
-        
-        const poseObj = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-        poseObj.setOptions({
-            modelComplexity: 1,
-            smoothLandmarks: true,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        
-        poseObj.onResults((results) => {
-            if (!results.poseLandmarks) return;
-            
-            // 修正畫布大小
-            canvas.width = video.clientWidth;
-            canvas.height = video.clientHeight;
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // 繪製骨架與關鍵點
-            drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#34d399', lineWidth: 3});
-            drawLandmarks(ctx, results.poseLandmarks, {color: '#f87171', radius: 4});
-            
-            // 獲取 右肩(12), 右肘(14), 右腕(16)
-            const s = results.poseLandmarks[12];
-            const e = results.poseLandmarks[14];
-            const w = results.poseLandmarks[16];
-            
-            if (s && e && w && e.visibility > 0.5) {
-                // 向量角度算法
-                const radians = Math.atan2(w.y - e.y, w.x - e.x) - Math.atan2(s.y - e.y, s.x - e.x);
-                let angle = Math.abs(radians * 180.0 / Math.PI);
-                if (angle > 180.0) angle = 360.0 - angle;
-                
-                angleDisplay.innerText = angle.toFixed(1) + "°";
-                
-                // 動態分析邏輯
-                if (angle < 95) {
-                    feedback.innerText = "❌ 引拍幅度過小：請將球拍向後拉，增加擊球蓄力。";
-                    feedback.style.background = "#fee2e2"; feedback.style.color = "#991b1b";
-                } else if (angle > 150) {
-                    feedback.innerText = "✅ 揮拍姿勢完美：引拍非常飽滿，發力極佳！";
-                    feedback.style.background = "#dcfce7"; feedback.style.color = "#166534";
-                } else {
-                    feedback.innerText = "🆗 姿勢良好：請保持揮拍的流暢度與穩定性。";
-                    feedback.style.background = "#dbeafe"; feedback.style.color = "#1e40af";
-                }
+        const v = document.getElementById('v-src');
+        const c = document.getElementById('v-canvas');
+        const ctx = c.getContext('2d');
+        const angVal = document.getElementById('ang-val');
+        const pose = new Pose({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+        pose.setOptions({modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5});
+        pose.onResults((res) => {
+            if (!res.poseLandmarks) return;
+            c.width = v.clientWidth; c.height = v.clientHeight;
+            ctx.clearRect(0,0,c.width,c.height);
+            drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+            const s = res.poseLandmarks[12], e = res.poseLandmarks[14], w = res.poseLandmarks[16];
+            if (s && e && w) {
+                const r = Math.atan2(w.y-e.y, w.x-e.x) - Math.atan2(s.y-e.y, s.x-e.x);
+                let d = Math.abs(r * 180 / Math.PI);
+                if (d > 180) d = 360 - d;
+                angVal.innerText = d.toFixed(1);
             }
         });
-
-        document.getElementById('ai-video-input').onchange = (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                video.src = URL.createObjectURL(file);
-                video.load();
-                video.play();
-            }
+        document.getElementById('video-in').onchange = (e) => {
+            const f = e.target.files[0];
+            if (f) { v.src = URL.createObjectURL(f); v.play(); }
         };
-
-        async function loop() {
-            if (!video.paused && !video.ended) {
-                await poseObj.send({image: video});
-            }
-            requestAnimationFrame(loop);
+        async function run() {
+            if (!v.paused && !v.ended) { await pose.send({image: v}); }
+            requestAnimationFrame(run);
         }
-        video.onplay = loop;
+        v.onplay = run;
     </script>
     """
-    components.html(ai_html_code, height=850)
+    components.html(ai_script, height=700)
 
-# ==========================================
-# 10. 模組功能：考勤點名中心
-# ==========================================
-elif selected_menu == "📝 考勤點名中心":
-    st.title("📝 考勤與訓練記錄中心")
+# D. 考勤點名 (完全還原表單與報表)
+elif choice == "📝 考勤點名中心":
+    st.title("📝 考勤與訓練記錄")
+    att_df = fetch_data('attendance', [])
     
-    c_l, c_r = st.columns(2)
-    classes = df_schedules["班級"].unique() if not df_schedules.empty else ["無班級數據"]
-    target_c = c_l.selectbox("選擇班級", classes)
-    target_d = c_r.date_input("點名日期", datetime.now())
-    
-    st.divider()
-    
-    st.subheader("🖋️ 點名作業")
-    st.info("💡 請輸入出席學員姓名，系統會自動統計人數。")
-    input_names = st.text_area("出席名單 (可用空格、逗號或換行分隔)", height=150)
-    
-    if st.button("🚀 提交點名紀錄並上傳雲端", use_container_width=True):
-        processed = [n.strip() for n in input_names.replace('\n', ',').replace(' ', ',').split(',') if n.strip()]
-        if not processed:
-            st.error("請輸入至少一名學員名單。")
-        else:
-            new_record = {
-                "班級": target_c,
-                "日期": str(target_d),
-                "出席名單": ", ".join(processed),
-                "出席人數": len(processed),
-                "記錄人": st.session_state.user_session["user_id"]
-            }
-            df_attendance = pd.concat([df_attendance, pd.DataFrame([new_record])], ignore_index=True)
-            commit_to_cloud('attendance', df_attendance)
-            st.success("考勤紀錄已成功保存！")
+    if st.session_state.auth["role"] == "admin":
+        with st.form("att_form", clear_on_submit=True):
+            st.subheader("➕ 記錄今日訓練")
+            c1, c2, c3 = st.columns(3)
+            date = c1.date_input("訓練日期", datetime.now())
+            cls = c2.selectbox("訓練班別", ["校隊班", "精英班", "中級班", "初級班", "興趣班"])
+            note = c3.text_input("課堂備註 (如: 學習長球)")
+            names = st.text_area("出席學生名單 (請以空格或逗號分隔)")
+            submit = st.form_submit_button("✅ 儲存考勤")
             
-    st.subheader("📜 歷史點名紀錄")
-    st.dataframe(df_attendance, use_container_width=True)
+            if submit:
+                clean_names = [n.strip() for n in names.replace(',', ' ').split() if n.strip()]
+                new_att = {"日期": str(date), "班別": cls, "出席名單": ", ".join(clean_names), "人數": len(clean_names), "備註": note}
+                att_df = pd.concat([att_df, pd.DataFrame([new_att])], ignore_index=True)
+                save_data('attendance', att_df)
+                st.success(f"已記錄 {len(clean_names)} 位隊員出席")
+                st.rerun()
 
-# ==========================================
-# 11. 模組功能：營運預算核算 (管理員專屬)
-# ==========================================
-elif selected_menu == "📊 營運預算核算":
-    st.title("📊 隊伍營運與財務估算後台")
-    st.markdown("---")
+    st.markdown("### 歷史考勤表")
+    st.dataframe(att_df.sort_values("日期", ascending=False), use_container_width=True, hide_index=True)
     
-    with st.container():
-        st.subheader("📥 收入參數設定")
-        sc1, sc2 = st.columns(2)
-        total_s = sc1.number_input("該期總學員人數", min_value=1, value=50)
-        fee_p = sc2.number_input("每人收費預算 ($)", min_value=0, value=250)
-        
-        st.subheader("📤 支出開支預計")
-        k1, k2, k3 = st.columns(3)
-        n_t = k1.number_input("校隊訓練班數 ($2750/班)", value=1)
-        n_m = k2.number_input("中級/初級訓練班 ($1350/班)", value=3)
-        n_h = k3.number_input("興趣班班數 ($1200/班)", value=4)
-        
-    st.divider()
-    
-    # 計算公式
-    rev_total = total_s * fee_p
-    exp_total = (n_t * 2750) + (n_m * 1350) + (n_h * 1200)
-    balance = rev_total - exp_total
-    
-    st.subheader("📈 結算摘要")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("預計總收入", f"${rev_total:,}")
-    m2.metric("預計總開支", f"${exp_total:,}")
-    m3.metric("預算盈餘/虧損", f"${balance:,}", delta=f"{balance}")
-    
-    # 財務視覺化
-    chart_data = pd.DataFrame({
-        "分類": ["學費收入", "運營開支", "盈餘"],
-        "金額": [rev_total, exp_total, balance]
-    })
-    st.bar_chart(chart_data, x="分類", y="金額", color="#2563eb")
+    # 匯出 Word 報告邏輯
+    if not att_df.empty:
+        if st.button("📄 生成本月考勤報告 (Word)"):
+            doc = Document()
+            doc.add_heading('正覺壁球隊 - 月度考勤報告', 0)
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = '日期'
+            hdr_cells[1].text = '班別'
+            hdr_cells[2].text = '人數'
+            hdr_cells[3].text = '出席名單'
+            for _, row in att_df.iterrows():
+                row_cells = table.add_row().cells
+                row_cells[0].text = str(row['日期'])
+                row_cells[1].text = row['班別']
+                row_cells[2].text = str(row['人數'])
+                row_cells[3].text = row['出席名單']
+            doc_io = io.BytesIO()
+            doc.save(doc_io)
+            st.download_button("📥 下載 Word 報告", doc_io.getvalue(), "attendance_report.docx")
 
-# ==========================================
-# 12. 模組功能：公告欄與比賽報名
-# ==========================================
-elif selected_menu == "📢 隊內最新公告":
-    st.title("📢 隊伍動態與官方公告")
-    if st.session_state.user_session["role"] == "admin":
-        with st.expander("➕ 發布新公告"):
-            with st.form("news_form"):
-                nt = st.text_input("公告標題")
-                nc = st.text_area("內容細節")
-                nl = st.selectbox("緊急度", ["普通", "重要", "置頂"])
-                if st.form_submit_button("立即發布"):
-                    new_n = {"標題": nt, "公告內容": nc, "發布日期": str(datetime.now().date()), "緊急度": nl}
-                    df_news = pd.concat([df_news, pd.DataFrame([new_n])], ignore_index=True)
-                    commit_to_cloud('news', df_news)
-                    st.rerun()
-                    
-    # 顯示公告內容
-    for idx, row in df_news.iloc[::-1].iterrows():
+# E. 得獎紀錄
+elif choice == "🎖️ 學生得獎紀錄":
+    st.title("🎖️ 榮譽榜")
+    award_df = fetch_data('awards', [])
+    for _, row in award_df.iterrows():
         st.markdown(f"""
-        <div style="background:white; padding:20px; border-radius:10px; border-left: 5px solid {'#ef4444' if row['緊急度']=='置頂' else '#3b82f6'}; margin-bottom:15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-            <h4 style="margin:0;">{row['標題']} <span style="font-size:12px; color:#94a3b8; font-weight:normal;">({row['發布日期']})</span></h4>
-            <p style="margin:10px 0; color:#475569;">{row['公告內容']}</p>
+        <div class="announcement-card" style="border-left-color: #ffd700;">
+            <p style="color: #64748b; font-size: 0.8rem;">{row['獲獎日期']}</p>
+            <h3 style="margin: 5px 0;">{row['比賽名稱']}</h3>
+            <p>🏆 <b>{row['獎項']}</b> — {row['學生姓名']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    if st.session_state.auth["role"] == "admin":
+        with st.expander("編輯獲獎數據"):
+            save_data('awards', st.data_editor(award_df, num_rows="dynamic"))
+
+# F. 公告欄 (還原樣式)
+elif choice == "📢 隊內最新公告":
+    st.title("📢 最新消息")
+    news_df = fetch_data('news', [])
+    for _, row in news_df.iloc[::-1].iterrows():
+        st.markdown(f"""
+        <div class="announcement-card">
+            <small style="color: #2563eb; font-weight: bold;">{row['日期']}</small>
+            <h3 style="margin-top: 5px;">{row['標題']}</h3>
+            <p style="color: #475569; line-height: 1.6;">{row['內容']}</p>
         </div>
         """, unsafe_allow_html=True)
 
-elif selected_menu == "⚡ 比賽報名與賽程":
-    st.title("⚡ 賽事報名與外部資訊連結")
-    if st.session_state.user_session["role"] == "admin":
-        edited_tour = st.data_editor(df_tournaments, num_rows="dynamic", use_container_width=True)
-        if st.button("💾 更新賽事清單"):
-            commit_to_cloud('tournaments', edited_tour)
-            st.rerun()
-            
-    st.dataframe(df_tournaments, use_container_width=True, hide_index=True)
+# G. 比賽報名
+elif choice == "⚡ 比賽報名系統":
+    st.title("⚡ 賽事報名直通車")
+    tour_df = fetch_data('tournaments', [])
+    for _, row in tour_df.iterrows():
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.markdown(f"**{row['賽事名稱']}**")
+            st.caption(f"截止日期: {row['截止日期']} | 狀態: {row['狀態']}")
+        with c2:
+            if row['報名連結']: st.link_button("前往報名", row['報名連結'])
+            else: st.button("尚未開放", disabled=True)
+        st.divider()
 
-elif selected_menu == "🎖️ 學生得獎紀錄":
-    st.title("🎖️ 學生個人與團體榮譽榜")
-    if st.session_state.user_session["role"] == "admin":
-        with st.form("award_input"):
-            st.write("填寫獲獎資訊")
-            st_name = st.text_input("獲獎學員姓名")
-            st_match = st.text_input("賽事名稱")
-            st_award = st.text_input("所得獎項")
-            st_date = st.date_input("獲獎日期")
-            if st.form_submit_button("新增榮譽"):
-                new_a = {"學生姓名": st_name, "比賽名稱": st_match, "獎項": st_award, "日期": str(st_date), "級別": "School"}
-                df_awards = pd.concat([df_awards, pd.DataFrame([new_a])], ignore_index=True)
-                commit_to_cloud('awards', df_awards)
-                st.rerun()
+# H. 營運預算 (完全還原原稿的所有費率與公式)
+elif choice == "📊 營運預算核算":
+    st.title("📊 隊伍財務預算與估算")
+    if st.session_state.auth["role"] != "admin":
+        st.warning("🔒 此功能僅限教練/管理員訪問。")
+        st.stop()
+        
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("🛠️ 支出預測 (教練費)")
+        n1 = st.number_input("校隊班 (2750/次) - 堂數", value=11)
+        n2 = st.number_input("精英/中/初級班 (1350/次) - 堂數", value=30)
+        n3 = st.number_input("興趣班 (1200/次) - 堂數", value=24)
+        total_exp = (n1 * 2750) + (n2 * 1350) + (n3 * 1200)
+        
+    with c2:
+        st.subheader("💰 收入預測 (學費)")
+        std_count = st.number_input("預計收生總人數", value=60)
+        fee = st.number_input("平均每人學費 ($)", value=800)
+        total_rev = std_count * fee
+        
+    st.divider()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("預計總收入", f"${total_rev:,}")
+    m2.metric("預計開班總支出", f"${total_exp:,}")
+    m3.metric("預計利潤/餘額", f"${total_rev - total_exp:,}", delta=f"{total_rev - total_exp}")
     
-    st.table(df_awards)
+    st.bar_chart(pd.DataFrame({"金額": [total_rev, total_exp]}, index=["收入", "支出"]))
 
-# ==========================================
-# 13. 系統底層日誌與頁尾
-# ==========================================
-st.sidebar.divider()
-st.sidebar.markdown(f"""
-<div style='font-size: 11px; color: #94a3b8;'>
-    系統運行環境：Python 3.11 / Streamlit / Firebase Cloud<br>
-    數據同步引擎：Active<br>
-    用戶終端 ID: {st.session_state.user_session['user_id']}
-</div>
-""", unsafe_allow_html=True)
+# 頁腳
+st.sidebar.markdown("---")
+st.sidebar.caption("正覺壁球管理系統 v1.2.0")
+st.sidebar.caption("© 2024 壁球隊行政組")
