@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import io
-import streamlit.components.v1 as components
 
 # 嘗試匯入 Firebase 套件
 try:
@@ -52,7 +51,6 @@ def get_admin_password():
     default_pwd = "8888"
     if st.session_state.get('db') is not None:
         try:
-            # 存取路徑遵循 RULE 1
             doc_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection('admin_settings').document('config')
             doc = doc_ref.get()
             if doc.exists:
@@ -61,12 +59,8 @@ def get_admin_password():
             pass
     return default_pwd
 
-# --- 3. 數據存取與同步函數 (詳細處理邏輯) ---
+# --- 3. 數據存取與同步函數 ---
 def load_cloud_data(collection_name, default_data):
-    """
-    從雲端載入數據，並進行格式檢查與容錯處理。
-    遵循 RULE 2: 不使用複雜查詢，在內存中過濾。
-    """
     key = f"cloud_{collection_name}"
     if st.session_state.get('db') is not None:
         try:
@@ -76,24 +70,14 @@ def load_cloud_data(collection_name, default_data):
             if data:
                 df = pd.DataFrame(data)
                 df.columns = [str(c).strip() for c in df.columns]
-                
-                # 數據清理與補全
                 if collection_name == 'attendance_records':
-                    required = ["班級", "日期", "出席人數", "出席名單", "記錄人"]
-                    for col in required:
+                    for col in ["班級", "日期", "出席人數", "出席名單", "記錄人"]:
                         if col not in df.columns: df[col] = ""
-                
-                if collection_name == 'rankings':
-                    required = ["年級", "班級", "姓名", "積分", "章別"]
-                    for col in required:
-                        if col not in df.columns: df[col] = "-" if col != "積分" else 0
-                
                 st.session_state[key] = df
                 return df
-        except Exception as e:
-            print(f"Error loading {collection_name}: {e}")
+        except Exception:
+            pass
     
-    # 備援：返回 session 或預設
     if key in st.session_state:
         return st.session_state[key]
     
@@ -102,66 +86,47 @@ def load_cloud_data(collection_name, default_data):
     return df_default
 
 def save_cloud_data(collection_name, df):
-    """
-    同步本地數據至 Firestore 雲端。
-    包含分批處理 logic 以符合 Firestore 限制。
-    """
     if df is None: return
     df = df.dropna(how='all')
     df.columns = [str(c).strip() for c in df.columns]
-    
-    # 更新本地快照
     key = f"cloud_{collection_name}"
     st.session_state[key] = df
-    
     if st.session_state.get('db') is not None:
         try:
             coll_ref = st.session_state.db.collection('artifacts').document(app_id).collection('public').document('data').collection(collection_name)
-            
-            # 1. 批量刪除舊數據 (Firestore 每批上限 500)
-            batch = st.session_state.db.batch()
-            count = 0
-            for doc in coll_ref.stream():
-                batch.delete(doc.reference)
-                count += 1
-                if count >= 400:
-                    batch.commit()
-                    batch = st.session_state.db.batch()
-                    count = 0
-            batch.commit()
-            
-            # 2. 寫入新數據
+            # 刪除舊數據
+            for doc in coll_ref.stream(): doc.reference.delete()
+            # 寫入新數據
             for _, row in df.iterrows():
-                # 決定 Document ID 的生成邏輯
                 if collection_name == 'attendance_records':
                     doc_id = f"{row.get('班級', 'Unknown')}_{row.get('日期', 'Unknown')}".replace("/", "-")
                 elif collection_name == 'announcements':
-                    # 使用日期與標題前綴
-                    dt_str = row.get('日期', '2025-01-01')
-                    doc_id = f"{dt_str}_{row.get('標題', 'NoTitle')[:10]}"
+                    doc_id = f"{row.get('日期')}_{row.get('標題', 'NoTitle')}"
                 elif collection_name == 'tournaments':
                     doc_id = f"tm_{row.get('比賽名稱', 'NoName')}_{row.get('日期', 'NoDate')}"
                 elif collection_name == 'student_awards':
                     doc_id = f"award_{row.get('學生姓名')}_{row.get('日期')}_{np.random.randint(1000)}"
                 elif '姓名' in row and ('年級' in row or '班級' in row):
+                    # 使用 班級+姓名 作為 ID 以區分不同學生，若沒班級則用姓名
                     doc_id = f"{row.get('班級', row.get('年級', 'NA'))}_{row.get('姓名')}"
                 else:
-                    doc_id = str(np.random.randint(10000000))
+                    doc_id = str(np.random.randint(1000000))
                 
-                # 清洗數據（移除 NaN）
                 clean_row = {k: (v if pd.notna(v) else None) for k, v in row.to_dict().items()}
                 coll_ref.document(doc_id).set(clean_row)
-            
-            st.toast(f"✅ {collection_name} 已成功同步至雲端")
+            st.toast(f"✅ {collection_name} 已同步至雲端")
         except Exception as e:
-            st.error(f"同步至雲端失敗: {e}")
+            st.error(f"同步失敗: {e}")
 
-# --- 4. 初始化 Session State 變數 ---
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'is_admin' not in st.session_state: st.session_state.is_admin = False
-if 'user_id' not in st.session_state: st.session_state.user_id = ""
+# --- 4. 初始化 Session State ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'is_admin' not in st.session_state:
+    st.session_state.is_admin = False
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = ""
 
-# 積分常量定義
+# 香港壁球總會章別獎勵設定
 BADGE_AWARDS = {
     "白金章": {"points": 400, "icon": "💎"},
     "金章": {"points": 200, "icon": "🥇"},
@@ -170,7 +135,7 @@ BADGE_AWARDS = {
     "無": {"points": 0, "icon": ""}
 }
 
-# --- 5. 側邊欄與導航介面 ---
+# --- 5. 側邊欄與登入邏輯 ---
 st.sidebar.title("🏸 正覺壁球管理系統")
 
 if not st.session_state.logged_in:
@@ -182,24 +147,30 @@ if not st.session_state.logged_in:
         if st.sidebar.button("登入管理系統"):
             admin_pwd = get_admin_password()
             if pwd == admin_pwd:
-                st.session_state.logged_in, st.session_state.is_admin, st.session_state.user_id = True, True, "ADMIN"
+                st.session_state.logged_in = True
+                st.session_state.is_admin = True
+                st.session_state.user_id = "ADMIN"
                 st.rerun()
             else:
                 st.sidebar.error("密碼錯誤")
     else:
-        st.sidebar.info("請輸入班別及學號 (如: 1A 01)")
-        sc1, sc2 = st.sidebar.columns(2)
-        s_class = sc1.text_input("班別", placeholder="1A")
-        s_num = sc2.text_input("學號", placeholder="01")
-        if st.sidebar.button("登入系統"):
+        st.sidebar.info("請輸入學生班別及學號 (例如: 1A 01)")
+        c1, c2 = st.sidebar.columns(2)
+        s_class = c1.text_input("班別", placeholder="如: 1A")
+        s_num = c2.text_input("學號", placeholder="如: 01")
+        if st.sidebar.button("登入"):
             if s_class and s_num:
-                st.session_state.logged_in, st.session_state.is_admin, st.session_state.user_id = True, False, f"{s_class.upper()}{s_num.zfill(2)}"
+                st.session_state.logged_in = True
+                st.session_state.is_admin = False
+                st.session_state.user_id = f"{s_class.upper()}{s_num.zfill(2)}"
                 st.rerun()
             else:
-                st.sidebar.error("資訊不足")
+                st.sidebar.error("請填寫完整資訊")
+    
+    st.info("👋 歡迎！請先在左側選單登入系統。")
     st.stop()
 
-# 登入成功後的側邊欄顯示
+# 登入後的側邊欄顯示
 if st.session_state.is_admin:
     st.sidebar.success(f"🛡️ 管理員已登入")
 else:
@@ -210,476 +181,456 @@ if st.sidebar.button("🔌 登出系統"):
     st.session_state.is_admin = False
     st.rerun()
 
-# --- 6. 數據加載流程 ---
-schedule_df = load_cloud_data('schedules', [])
-class_players_df = load_cloud_data('class_players', [])
-rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["年級", "班級", "姓名", "積分", "章別"]))
-attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
-announcements_df = load_cloud_data('announcements', pd.DataFrame(columns=["標題", "內容", "日期"]))
-tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
-awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
+# --- 6. 數據加載 (移除刷新按鈕，改為直接檢查載入) ---
+if 'schedule_df' not in st.session_state:
+    st.session_state.schedule_df = load_cloud_data('schedules', [])
+if 'class_players_df' not in st.session_state:
+    st.session_state.class_players_df = load_cloud_data('class_players', [])
+if 'rank_df' not in st.session_state:
+    st.session_state.rank_df = load_cloud_data('rankings', pd.DataFrame(columns=["年級", "班級", "姓名", "積分", "章別"]))
+if 'attendance_records' not in st.session_state:
+    st.session_state.attendance_records = load_cloud_data('attendance_records', pd.DataFrame(columns=["班級", "日期", "出席人數", "出席名單", "記錄人"]))
+if 'announcements_df' not in st.session_state:
+    st.session_state.announcements_df = load_cloud_data('announcements', pd.DataFrame(columns=["標題", "內容", "日期"]))
+if 'tournaments_df' not in st.session_state:
+    st.session_state.tournaments_df = load_cloud_data('tournaments', pd.DataFrame(columns=["比賽名稱", "日期", "截止日期", "連結", "備註"]))
+if 'awards_df' not in st.session_state:
+    st.session_state.awards_df = load_cloud_data('student_awards', pd.DataFrame(columns=["學生姓名", "比賽名稱", "獎項", "日期", "備註"]))
 
-# 功能選單導航
-menu_options = [
-    "📅 訓練日程表", 
-    "🏆 隊員排行榜", 
-    "🤖 AI 智能動作分析", 
-    "📝 考勤點名", 
-    "🏅 學生得獎紀錄", 
-    "📢 活動公告", 
-    "🗓️ 比賽報名與賽程"
-]
+# 菜單導航
+menu_options = ["📅 訓練日程表", "🏆 隊員排行榜", "📝 考勤點名", "🏅 學生得獎紀錄", "📢 活動公告", "🗓️ 比賽報名與賽程"]
 if st.session_state.is_admin:
     menu_options.append("💰 學費與預算核算")
 menu = st.sidebar.radio("功能選單", menu_options)
 
-# --- 7. 頁面模組實現 ---
+# --- 7. 頁面模組 ---
 
-# --- 7.1 AI 智能分析模組 ---
-if menu == "🤖 AI 智能動作分析":
-    st.title("🤖 AI 動作自動分析儀")
-    st.info("💡 指引：上傳訓練影片後，AI 會自動追蹤人體骨骼點並分析手肘揮拍角度。")
-    
-    ai_component = """
-    <div style="background: #f1f5f9; padding: 20px; border-radius: 12px; border: 1px solid #cbd5e1; font-family: system-ui, -apple-system, sans-serif;">
-        <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-        
-        <div style="margin-bottom: 15px;">
-            <label style="font-weight: bold; color: #334155;">1. 上傳訓練影片檔案 (建議長度 < 30秒)</label>
-            <input type="file" id="videoUpload" accept="video/*" style="display: block; width: 100%; margin-top: 5px; padding: 8px; border: 1px dashed #64748b; border-radius: 6px;">
-        </div>
-
-        <div style="position: relative; background: #000; border-radius: 8px; overflow: hidden; display: flex; justify-content: center; min-height: 400px;">
-            <video id="vidSource" controls style="max-width: 100%; height: auto;"></video>
-            <canvas id="overlayCanvas" style="position: absolute; top: 0; left: 0; pointer-events: none; width: 100%; height: 100%;"></canvas>
-        </div>
-
-        <div style="margin-top: 15px; display: flex; gap: 15px; flex-wrap: wrap;">
-            <div style="background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; min-width: 120px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); flex: 1;">
-                <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase;">手肘揮拍角度</div>
-                <div id="angleDisplay" style="font-size: 32px; font-weight: bold; color: #2563eb;">0°</div>
-            </div>
-            <div id="aiAdvice" style="background: #dbeafe; padding: 15px; border-radius: 8px; flex: 3; border: 1px solid #bfdbfe; font-size: 15px; color: #1e3a8a; display: flex; align-items: center; min-width: 280px;">
-                系統準備就緒。請上傳並播放影片，AI 將實時標註關節點並給予姿勢建議。
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const video = document.getElementById('vidSource');
-        const canvas = document.getElementById('overlayCanvas');
-        const ctx = canvas.getContext('2d');
-        const angleTxt = document.getElementById('angleDisplay');
-        const adviceBox = document.getElementById('aiAdvice');
-
-        // 初始化 MediaPipe Pose
-        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-        pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-
-        // 角度計算函數
-        function calculateAngle(A, B, C) {
-            let angle = Math.abs(Math.atan2(C.y - B.y, C.x - B.x) - Math.atan2(A.y - B.y, A.x - B.x)) * 180 / Math.PI;
-            if (angle > 180) angle = 360 - angle;
-            return angle.toFixed(1);
-        }
-
-        pose.onResults((results) => {
-            if (!results.poseLandmarks) return;
-            
-            // 同步 Canvas 尺寸
-            if (canvas.width !== video.clientWidth) {
-                canvas.width = video.clientWidth;
-                canvas.height = video.clientHeight;
-            }
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // 繪製骨架
-            drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#10b981', lineWidth: 3});
-            drawLandmarks(ctx, results.poseLandmarks, {color: '#ef4444', lineWidth: 1, radius: 3});
-
-            // 提取關鍵點 (12:肩, 14:肘, 16:腕)
-            const shoulder = results.poseLandmarks[12];
-            const elbow = results.poseLandmarks[14];
-            const wrist = results.poseLandmarks[16];
-
-            if (shoulder && elbow && wrist && elbow.visibility > 0.6) {
-                const angle = calculateAngle(shoulder, elbow, wrist);
-                angleTxt.innerText = angle + "°";
-                
-                // 智能建議邏輯
-                if (angle < 80) {
-                    adviceBox.innerHTML = "⚠️ <b>姿勢優化建議：</b>收手過於急促。壁球揮拍需要更大幅度的引拍，請嘗試讓手臂向後延伸更多。";
-                } else if (angle > 168) {
-                    adviceBox.innerHTML = "⚠️ <b>姿勢優化建議：</b>手臂伸得太直了。過直的關節會減少擊球彈性並增加受傷風險，請保持微彎。";
-                } else {
-                    adviceBox.innerHTML = "✅ <b>AI 評定：</b>揮拍弧度良好。請保持此節奏，專注於擊球點的控制。";
-                }
-            }
-        });
-
-        document.getElementById('videoUpload').onchange = (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                video.src = URL.createObjectURL(file);
-                video.style.display = 'block';
-                video.play();
-            }
-        };
-
-        async function detect() {
-            if (!video.paused && !video.ended) {
-                await pose.send({image: video});
-            }
-            requestAnimationFrame(detect);
-        }
-        video.onplay = detect;
-    </script>
-    """
-    components.html(ai_component, height=780)
-
-# --- 7.2 訓練日程表 ---
-elif menu == "📅 訓練日程表":
+if menu == "📅 訓練日程表":
     st.title("📅 訓練班日程管理")
     if st.session_state.is_admin:
-        with st.expander("📤 管理員：匯入新日程"):
-            st.info("請上傳包含「班級、地點、時間、具體日期」等欄位的 Excel 檔案。")
-            u_sched = st.file_uploader("選擇 Excel 檔案 (xlsx)", type=["xlsx"])
-            if u_sched:
-                df_new = pd.read_excel(u_sched)
-                st.write("預覽上傳數據：")
-                st.dataframe(df_new.head())
-                if st.button("🚀 確認覆蓋並更新雲端"):
-                    save_cloud_data('schedules', df_new)
-                    st.success("日程表已成功覆蓋！")
-                    st.rerun()
-                    
-    if not schedule_df.empty:
-        st.subheader("目前日程清單")
-        st.dataframe(schedule_df, use_container_width=True)
-        
-        # 額外的視圖：按班級過濾
-        cls_filter = st.multiselect("按班級過濾顯示", schedule_df["班級"].unique())
-        if cls_filter:
-            st.table(schedule_df[schedule_df["班級"].isin(cls_filter)])
+        u_sched = st.file_uploader("匯入日程 Excel", type=["xlsx"])
+        if u_sched:
+            df_new = pd.read_excel(u_sched)
+            if st.button("🚀 確認更新日程"):
+                st.session_state.schedule_df = df_new
+                save_cloud_data('schedules', df_new)
+                st.rerun()
+    if not st.session_state.schedule_df.empty:
+        st.dataframe(st.session_state.schedule_df, use_container_width=True)
     else:
-        st.warning("目前尚無日程數據，管理員可從 Excel 匯入。")
+        st.info("暫無日程。")
 
-# --- 7.3 隊員排行榜 ---
 elif menu == "🏆 隊員排行榜":
     st.title("🏆 正覺壁球隊積分榜")
-    st.info("💡 積分獎勵機制：白金(+400), 金(+200), 銀(+100), 銅(+50)。所有新入隊員預設 100 分。")
+    st.info("💡 考取香港壁球總會章別獎勵：白金(+400), 金(+200), 銀(+100), 銅(+50)")
     
     if st.session_state.is_admin:
-        with st.expander("🛠️ 排行榜後台維護系統", expanded=False):
-            t1, t2, t3, t4 = st.tabs(["📤 同步球員名單", "🥇 考章獎勵發放", "✏️ 手動積分微調", "📥 導出資料"])
+        with st.expander("🛠️ 排行榜管理"):
+            tab_upload, tab_badge, tab_manual, tab_export = st.tabs(["📤 批量匯入/同步", "🥇 章別獎勵登記", "✏️ 手動調整分數", "📥 匯出排行榜"])
             
-            with t1:
-                st.write("此功能會將『隊員名單』中尚未出現在排行榜的球員自動加入。")
-                if st.button("🔄 開始自動同步"):
-                    if not class_players_df.empty:
-                        updated_rank = rank_df.copy()
-                        new_added = 0
-                        for _, p in class_players_df.iterrows():
-                            # 判定唯一性：姓名 + 班級
-                            mask = (updated_rank["姓名"].astype(str).str.strip() == str(p["姓名"]).strip()) & \
-                                   (updated_rank["班級"].astype(str).str.strip() == str(p["班級"]).strip())
-                            if not any(mask):
-                                new_row = {
-                                    "年級": p.get("年級","-"), 
-                                    "班級": p["班級"], 
-                                    "姓名": p["姓名"], 
-                                    "積分": 100, 
+            with tab_upload:
+                st.write("您可以從「學生名單」自動同步或手動匯入 Excel。系統會自動排除重複報名的學生。")
+                if st.button("🔄 從壁球班名單同步所有學生", help="將點名系統中的學生自動加入排行榜，並自動過濾重複"):
+                    if not st.session_state.class_players_df.empty:
+                        df_r = st.session_state.rank_df
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
+                            if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
+                        
+                        count_added = 0
+                        for _, p_row in st.session_state.class_players_df.iterrows():
+                            # 同時比對姓名與年級，防止重複
+                            exists = ((df_r["姓名"].astype(str).str.strip() == str(p_row["姓名"]).strip()) & (df_r["年級"].astype(str).str.strip() == str(p_row.get("年級", "-")).strip())).any()
+                            if not exists:
+                                new_entry = pd.DataFrame([{
+                                    "年級": str(p_row.get("年級", "-")).strip(),
+                                    "班級": str(p_row["班級"]).strip(),
+                                    "姓名": str(p_row["姓名"]).strip(),
+                                    "積分": 100,
                                     "章別": "無"
-                                }
-                                updated_rank = pd.concat([updated_rank, pd.DataFrame([new_row])], ignore_index=True)
-                                new_added += 1
-                        save_cloud_data('rankings', updated_rank)
-                        st.success(f"同步完畢！成功新增 {new_added} 名新球員至積分榜。")
+                                }])
+                                df_r = pd.concat([df_r, new_entry], ignore_index=True)
+                                count_added += 1
+                        
+                        st.session_state.rank_df = df_r
+                        save_cloud_data('rankings', df_r)
+                        st.success(f"同步完成！新增了 {count_added} 位新學生。")
                         st.rerun()
-                    else:
-                        st.error("請先在『考勤點名』分頁匯入球員名單！")
 
-            with t2:
-                with st.form("award_form"):
-                    st.write("### 登記章別獎勵")
-                    col_a1, col_a2 = st.columns(2)
-                    b_name = col_a1.text_input("獲獎學生姓名")
-                    b_class = col_a2.text_input("學生所屬班別")
-                    b_type = st.selectbox("獲得章別", ["白金章", "金章", "銀章", "銅章"])
-                    if st.form_submit_button("確認發放"):
-                        df = rank_df.copy()
-                        mask = (df["姓名"].astype(str).str.strip() == b_name.strip()) & (df["班級"].astype(str).str.strip() == b_class.strip())
+                u_rank = st.file_uploader("匯入積分榜 Excel (需包含: 年級, 班級, 姓名, 積分)", type=["xlsx"])
+                if u_rank:
+                    df_r = pd.read_excel(u_rank)
+                    if st.button("🚀 確認更新積分排名"):
+                        st.session_state.rank_df = df_r
+                        save_cloud_data('rankings', df_r)
+                        st.rerun()
+            
+            with tab_badge:
+                with st.form("badge_award_form"):
+                    b_name = st.text_input("獲章學生姓名").strip()
+                    b_grade = st.text_input("年級 (如: P4)").strip()
+                    b_class = st.text_input("班別 (如: 4A)").strip()
+                    b_type = st.selectbox("所考獲章別", ["白金章", "金章", "銀章", "銅章"])
+                    if st.form_submit_button("確認發放獎勵積分"):
+                        df_r = st.session_state.rank_df.copy()
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
+                            if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
+                        
+                        # 查找學生 (嚴格對比字串並去除空格)
+                        mask = (df_r["姓名"].astype(str).str.strip() == b_name) & (df_r["年級"].astype(str).str.strip() == b_grade)
                         if any(mask):
-                            idx = df[mask].index[0]
-                            df.at[idx, "章別"] = b_type
-                            old_p = pd.to_numeric(df.at[idx, "積分"], errors='coerce') or 0
-                            df.at[idx, "積分"] = int(old_p + BADGE_AWARDS[b_type]["points"])
-                            save_cloud_data('rankings', df)
-                            st.success(f"獎勵已入帳！{b_name} 的積分已更新。")
+                            idx = df_r[mask].index[0]
+                            df_r.at[idx, "章別"] = b_type
+                            # 計算積分
+                            current_pts = pd.to_numeric(df_r.at[idx, "積分"], errors='coerce')
+                            if pd.isna(current_pts): current_pts = 0
+                            df_r.at[idx, "積分"] = int(current_pts + BADGE_AWARDS[b_type]["points"])
+                            if b_class: df_r.at[idx, "班級"] = b_class
+                        else:
+                            # 找不到則建立新記錄
+                            new_row = pd.DataFrame([{
+                                "年級": b_grade if b_grade else "-",
+                                "班級": b_class if b_class else "-",
+                                "姓名": b_name, 
+                                "積分": 100 + BADGE_AWARDS[b_type]["points"],
+                                "章別": b_type
+                            }])
+                            df_r = pd.concat([df_r, new_row], ignore_index=True)
+                        
+                        # 更新並同步
+                        st.session_state.rank_df = df_r
+                        save_cloud_data('rankings', df_r)
+                        st.success(f"已更新 {b_name} 的章別及積分。")
+                        st.rerun()
+
+            with tab_manual:
+                with st.form("manual_adjust_form"):
+                    m_name = st.text_input("學生姓名").strip()
+                    m_grade = st.text_input("年級").strip()
+                    m_points = st.number_input("調整分數 (加分輸入正數，扣分輸入負數)", value=10, step=1)
+                    if st.form_submit_button("執行分數調整"):
+                        df_r = st.session_state.rank_df.copy()
+                        for col in ["年級", "班級", "姓名", "積分", "章別"]:
+                            if col not in df_r.columns: df_r[col] = 0 if col == "積分" else "無"
+                        
+                        mask = (df_r["姓名"].astype(str).str.strip() == m_name) & (df_r["年級"].astype(str).str.strip() == m_grade)
+                        if any(mask):
+                            idx = df_r[mask].index[0]
+                            old_pts = pd.to_numeric(df_r.at[idx, "積分"], errors='coerce')
+                            if pd.isna(old_pts): old_pts = 0
+                            df_r.at[idx, "積分"] = int(old_pts + m_points)
+                            st.session_state.rank_df = df_r
+                            save_cloud_data('rankings', df_r)
+                            st.success(f"已調整 {m_name} 的分數 ({old_pts} -> {old_pts + m_points})")
                             st.rerun()
                         else:
-                            st.error("找不到該隊員，請確認姓名與班別輸入是否完全正確。")
+                            st.error("找不到該學生，請確認姓名及年級是否正確。")
 
-            with t3:
-                with st.form("manual_adj"):
-                    st.write("### 積分手動增減 (例如比賽表現、遲到扣分等)")
-                    m_name = st.text_input("球員姓名")
-                    m_class = st.text_input("球員班別")
-                    m_pts = st.number_input("增減分數 (負數為扣分)", value=0, step=1)
-                    m_reason = st.text_input("調整備註")
-                    if st.form_submit_button("執行調整"):
-                        df = rank_df.copy()
-                        mask = (df["姓名"].astype(str).str.strip() == m_name.strip()) & (df["班級"].astype(str).str.strip() == m_class.strip())
-                        if any(mask):
-                            idx = df[mask].index[0]
-                            current_val = pd.to_numeric(df.at[idx, "積分"], errors='coerce') or 0
-                            df.at[idx, "積分"] = int(current_val + m_pts)
-                            save_cloud_data('rankings', df)
-                            st.success(f"已更新 {m_name} 的積分。")
-                            st.rerun()
-                        else:
-                            st.error("找不到該隊員")
+            with tab_export:
+                st.write("將目前的排行榜內容匯出為 Excel 檔案。")
+                if not st.session_state.rank_df.empty:
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        export_df = st.session_state.rank_df.copy()
+                        export_df = export_df.drop_duplicates(subset=["年級", "姓名"], keep='first')
+                        export_df["積分"] = pd.to_numeric(export_df["積分"], errors='coerce').fillna(0).astype(int)
+                        export_df = export_df.sort_values(by="積分", ascending=False)
+                        export_df.to_excel(writer, index=False, sheet_name='積分榜')
+                    
+                    st.download_button(
+                        label="📥 下載積分排行榜 (Excel)",
+                        data=output.getvalue(),
+                        file_name=f"squash_ranking_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.info("目前無數據可供匯出。")
+    
+    if not st.session_state.rank_df.empty:
+        display_rank_df = st.session_state.rank_df.copy()
+        required_cols = ["年級", "班級", "姓名", "積分", "章別"]
+        for col in required_cols:
+            if col not in display_rank_df.columns:
+                display_rank_df[col] = 0 if col == "積分" else "-"
 
-            with t4:
-                if not rank_df.empty:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-                        rank_df.to_excel(writer, index=False)
-                    st.download_button("📥 下載全隊積分 Excel 表", buf.getvalue(), "squash_ranking_data.xlsx")
-
-    # 顯示主排行榜
-    if not rank_df.empty:
-        # 資料預處理
-        disp_df = rank_df.copy()
-        disp_df["積分"] = pd.to_numeric(disp_df["積分"], errors='coerce').fillna(0).astype(int)
-        disp_df = disp_df.sort_values("積分", ascending=False).reset_index(drop=True)
-        disp_df.index += 1
+        # 自動合併重複學生（姓名+年級）
+        display_rank_df["姓名"] = display_rank_df["姓名"].astype(str).str.strip()
+        display_rank_df["年級"] = display_rank_df["年級"].astype(str).str.strip()
+        display_rank_df = display_rank_df.drop_duplicates(subset=["年級", "姓名"], keep='first')
+        display_rank_df["積分"] = pd.to_numeric(display_rank_df["積分"], errors='coerce').fillna(0).astype(int)
+        display_rank_df = display_rank_df.sort_values(by="積分", ascending=False)
         
-        # 視覺化展示
-        top_3 = disp_df.head(3)
-        if not top_3.empty:
-            st.write("### 👑 本季三強")
-            c1, c2, c3 = st.columns(3)
-            with c1: st.markdown(f"🥇 **{top_3.iloc[0]['姓名']}**\n\n{top_3.iloc[0]['積分']} pts")
-            if len(top_3) > 1:
-                with c2: st.markdown(f"🥈 **{top_3.iloc[1]['姓名']}**\n\n{top_3.iloc[1]['積分']} pts")
-            if len(top_3) > 2:
-                with c3: st.markdown(f"🥉 **{top_3.iloc[2]['姓名']}**\n\n{top_3.iloc[2]['積分']} pts")
+        def get_rank_ui(row):
+            badge = str(row.get("章別", "無"))
+            icon_info = BADGE_AWARDS.get(badge, {"icon": ""})
+            return f"{icon_info['icon']} {badge}" if badge != "無" and badge != "nan" else "-"
+
+        display_rank_df["榮譽勳章"] = display_rank_df.apply(get_rank_ui, axis=1)
+        display_rank_df.reset_index(drop=True, inplace=True)
+        display_rank_df.index = np.arange(1, len(display_rank_df) + 1)
         
-        st.write("### 📊 完整積分列表")
-        st.table(disp_df[["年級", "班級", "姓名", "積分", "章別"]])
+        cols_to_show = ["年級", "班級", "姓名", "積分", "榮譽勳章"]
+        st.table(display_rank_df[cols_to_show])
     else:
-        st.info("目前排行榜為空。")
+        st.info("暫無積分數據。")
 
-# --- 7.4 考勤點名 ---
 elif menu == "📝 考勤點名":
-    st.title("📝 考勤點名系統")
+    st.title("📝 考勤點名與報表")
     if st.session_state.is_admin:
-        with st.expander("👤 學生名單維護"):
-            u_p = st.file_uploader("匯入全校球員總名單 (xlsx)", type=["xlsx"])
-            if u_p and st.button("確認更新名單"):
-                save_cloud_data('class_players', pd.read_excel(u_p))
+        u_class = st.file_uploader("匯入學生名單 Excel (欄位：班級, 姓名, 年級, 學號[選填])", type=["xlsx"])
+        if u_class:
+            df_c = pd.read_excel(u_class)
+            if st.button("🚀 確認更新名單"):
+                st.session_state.class_players_df = df_c
+                save_cloud_data('class_players', df_c)
                 st.rerun()
 
-    if schedule_df.empty:
-        st.warning("請先於『訓練日程表』匯入班級與日期數據。")
+    if st.session_state.schedule_df.empty:
+        st.warning("請先在『訓練日程表』匯入班級數據。")
     else:
-        c_list = schedule_df["班級"].unique()
-        sel_c = st.selectbox("1. 選擇班級", c_list)
+        class_list = st.session_state.schedule_df["班級"].unique().tolist()
+        sel_class = st.selectbox("請選擇班別", class_list)
         
-        dates_raw = schedule_df[schedule_df["班級"]==sel_c]["具體日期"].iloc[0]
-        dates_list = [d.strip() for d in str(dates_raw).split(",") if d.strip()]
-        sel_d = st.selectbox("2. 選擇訓練日期", dates_list)
+        class_info = st.session_state.schedule_df[st.session_state.schedule_df["班級"] == sel_class]
+        raw_dates = str(class_info.iloc[0].get("具體日期", ""))
+        all_dates = [d.strip() for d in raw_dates.split(",") if d.strip()]
         
-        curr_players = class_players_df[class_players_df["班級"]==sel_c]
-        if not curr_players.empty:
-            # 讀取現有紀錄
-            exist_rec = attendance_records[(attendance_records["班級"]==sel_c) & (attendance_records["日期"]==sel_d)]
-            present_list = exist_rec.iloc[0]["出席名單"].split(", ") if not exist_rec.empty else []
+        if st.session_state.is_admin:
+            tabs = st.tabs(["🎯 今日點名", "📊 考勤總表"])
+            tab1 = tabs[0]
+            tab2 = tabs[1]
+        else:
+            tab1 = st.container()
+            tab2 = None
+
+        with tab1:
+            if not st.session_state.is_admin:
+                st.markdown("### 🎯 今日點名紀錄")
+            sel_date = st.selectbox("選擇日期", all_dates)
+            current_players = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class] if not st.session_state.class_players_df.empty else pd.DataFrame()
             
-            st.subheader(f"📍 點名區域：{sel_c} ({sel_d})")
-            st.write(f"當前出席人數：{len(present_list)}")
+            if not current_players.empty:
+                attendance_recs = st.session_state.attendance_records
+                existing_rec = attendance_recs[(attendance_recs["班級"] == sel_class) & (attendance_recs["日期"] == sel_date)]
+                existing_list = existing_rec.iloc[0]["出席名單"].split(", ") if not existing_rec.empty and pd.notna(existing_rec.iloc[0]["出席名單"]) else []
+
+                st.markdown(f"#### 📋 {sel_class} - {sel_date}")
+                if not existing_rec.empty:
+                    st.caption(f"上次更新由: {existing_rec.iloc[0].get('記錄人', '系統')}")
+
+                cols = st.columns(4)
+                attendance_dict = {}
+                for i, row in enumerate(current_players.to_dict('records')):
+                    name = str(row['姓名'])
+                    with cols[i % 4]:
+                        attendance_dict[name] = st.checkbox(
+                            f"{name}", 
+                            value=(name in existing_list), 
+                            key=f"chk_{name}_{sel_date}",
+                            disabled=not st.session_state.is_admin
+                        )
+                
+                if st.session_state.is_admin:
+                    if st.button("💾 儲存點名", type="primary"):
+                        present_names = [n for n, p in attendance_dict.items() if p]
+                        new_rec = {
+                            "班級": sel_class, 
+                            "日期": sel_date, 
+                            "出席人數": len(present_names), 
+                            "出席名單": ", ".join(present_names),
+                            "記錄人": st.session_state.user_id
+                        }
+                        df_recs = st.session_state.attendance_records
+                        df_recs = df_recs[~((df_recs["班級"] == sel_class) & (df_recs["日期"] == sel_date))]
+                        st.session_state.attendance_records = pd.concat([df_recs, pd.DataFrame([new_rec])], ignore_index=True)
+                        save_cloud_data('attendance_records', st.session_state.attendance_records)
+                        st.success("✅ 儲存成功")
+                else:
+                    st.info("ℹ️ 您目前的權限僅能查看點名紀錄，無法進行修改。")
+            else:
+                st.info("該班別尚無名單數據。")
+
+        if tab2 is not None:
+            with tab2:
+                st.markdown(f"### 📊 {sel_class} 考勤總表")
+                class_records = st.session_state.attendance_records[st.session_state.attendance_records["班級"] == sel_class]
+                class_players = st.session_state.class_players_df[st.session_state.class_players_df["班級"] == sel_class]
+                
+                if class_players.empty:
+                    st.info("尚無學生名單數據。")
+                elif class_records.empty:
+                    st.info("尚無考勤紀錄。")
+                else:
+                    report_dates = all_dates
+                    student_names = class_players["姓名"].unique().tolist()
+                    
+                    matrix_data = []
+                    for name in student_names:
+                        row_data = {"學生姓名": name}
+                        for date in report_dates:
+                            daily_rec = class_records[class_records["日期"] == date]
+                            if not daily_rec.empty:
+                                present_list = str(daily_rec.iloc[0]["出席名單"]).split(", ")
+                                row_data[date] = "✅" if name in present_list else "✘"
+                            else:
+                                row_data[date] = "-" 
+                        matrix_data.append(row_data)
+                    
+                    report_df = pd.DataFrame(matrix_data)
+                    st.dataframe(report_df.set_index("學生姓名"), use_container_width=True)
+                    
+                    csv = report_df.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 下載考勤報表 (CSV)",
+                        data=csv,
+                        file_name=f"{sel_class}_attendance_report.csv",
+                        mime="text/csv",
+                    )
+
+elif menu == "🏅 學生得獎紀錄":
+    st.title("🏅 學生比賽榮譽榜")
+    
+    if st.session_state.is_admin:
+        with st.expander("➕ 新增得獎紀錄"):
+            with st.form("new_award_form", clear_on_submit=True):
+                a_name = st.text_input("學生姓名 (如: 張小明)")
+                a_comp = st.text_input("比賽名稱 (如: 全港青少年壁球錦標賽)")
+                a_prize = st.text_input("獎項 (如: 冠軍 / 優異獎)")
+                a_date = st.date_input("獲獎日期")
+                a_note = st.text_area("備註")
+                if st.form_submit_button("儲存紀錄"):
+                    new_award = {
+                        "學生姓名": a_name,
+                        "比賽名稱": a_comp,
+                        "獎項": a_prize,
+                        "日期": str(a_date),
+                        "備註": a_note
+                    }
+                    st.session_state.awards_df = pd.concat([st.session_state.awards_df, pd.DataFrame([new_award])], ignore_index=True)
+                    save_cloud_data('student_awards', st.session_state.awards_df)
+                    st.rerun()
+
+    if not st.session_state.awards_df.empty:
+        student_real_name = ""
+        if not st.session_state.is_admin and not st.session_state.class_players_df.empty:
+            df_cp = st.session_state.class_players_df
+            if "班級" in df_cp.columns and "學號" in df_cp.columns:
+                match = df_cp[(df_cp["班級"].astype(str).str.upper() + df_cp["學號"].astype(str).str.zfill(2)) == st.session_state.user_id]
+                if not match.empty:
+                    student_real_name = str(match.iloc[0]["姓名"])
             
-            att_dict = {}
-            col_count = 4
-            grid = st.columns(col_count)
-            for i, name in enumerate(sorted(curr_players["姓名"])):
-                with grid[i % col_count]:
-                    # 只有管理員可以修改，學生僅能查看
-                    is_present = st.checkbox(name, value=(name in present_list), disabled=not st.session_state.is_admin)
-                    att_dict[name] = is_present
+        st.markdown("### 🏆 榮譽榜單")
+        
+        for index, row in st.session_state.awards_df.sort_values(by="日期", ascending=False).iterrows():
+            is_own_award = (str(row["學生姓名"]).strip() == str(student_real_name).strip() and student_real_name != "")
+            bg_color = "#e8f0fe" if is_own_award else "#ffffff"
+            border = "2px solid #1a73e8" if is_own_award else "1px solid #e0e0e0"
+            text_color = "#202124"
+            
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 18px; border-radius: 12px; border: {border}; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="margin:0; color: #1a73e8; font-size: 1.4em;">🏆 {row['獎項']}</h3>
+                <div style="color: {text_color}; margin-top: 10px;">
+                    <p style="margin:4px 0;"><b>比賽名稱：</b>{row['比賽名稱']}</p>
+                    <p style="margin:4px 0;"><b>獲獎學生：</b>{row['學生姓名']} { ' <span style="color:#d93025; font-weight:bold;">(⭐ 恭喜您！)</span>' if is_own_award else ''}</p>
+                    <p style="margin:4px 0; font-size: 0.9em; color: #5f6368;">📅 獲獎日期：{row['日期']}</p>
+                    { f'<p style="margin:8px 0 0 0; font-style: italic; border-top: 1px dashed #ccc; padding-top: 8px;">{row["備註"]}</p>' if row["備註"] else '' }
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
             if st.session_state.is_admin:
-                if st.button("💾 儲存點名結果"):
-                    final_present = [n for n, v in att_dict.items() if v]
-                    new_rec = {
-                        "班級": sel_c, 
-                        "日期": sel_d, 
-                        "出席人數": len(final_present), 
-                        "出席名單": ", ".join(final_present), 
-                        "記錄人": st.session_state.user_id
-                    }
-                    # 更新邏輯：先移除舊的再加入新的
-                    updated_att = attendance_records.copy()
-                    updated_att = updated_att[~((updated_att["班級"]==sel_c) & (updated_att["日期"]==sel_d))]
-                    updated_att = pd.concat([updated_att, pd.DataFrame([new_rec])], ignore_index=True)
-                    save_cloud_data('attendance_records', updated_att)
-                    st.success("考勤資料已同步至雲端。")
+                if st.button(f"🗑️ 刪除此項紀錄", key=f"del_award_{index}"):
+                    st.session_state.awards_df = st.session_state.awards_df.drop(index)
+                    save_cloud_data('student_awards', st.session_state.awards_df)
                     st.rerun()
-        else:
-            st.error("名單內找不到該班級的球員，請檢查學生名單是否已正確上傳。")
+    else:
+        st.info("目前尚無得獎紀錄。")
 
-# --- 7.5 學費與預算核算 (管理員專屬) ---
-elif menu == "💰 學費與預算核算":
-    st.title("💰 預算與營運核算系統")
-    st.write("這是一個基於當前班級配置與收生情況的財務預算模擬工具。")
+elif menu == "📢 活動公告":
+    st.title("📢 賽事及活動公告")
+    if st.session_state.is_admin:
+        with st.form("new_post", clear_on_submit=True):
+            p_title = st.text_input("公告標題")
+            p_content = st.text_area("公告內容")
+            if st.form_submit_button("發布公告"):
+                new_p = pd.DataFrame([{"標題": p_title, "內容": p_content, "日期": datetime.now().strftime("%Y-%m-%d")}])
+                st.session_state.announcements_df = pd.concat([st.session_state.announcements_df, new_p], ignore_index=True)
+                save_cloud_data('announcements', st.session_state.announcements_df)
+                st.rerun()
     
-    col_input_left, col_input_right = st.columns(2)
+    if not st.session_state.announcements_df.empty:
+        for index, row in st.session_state.announcements_df.iloc[::-1].iterrows():
+            with st.chat_message("user"):
+                st.subheader(row['標題'])
+                st.caption(f"📅 {row['日期']}")
+                st.write(row['內容'])
+                if st.session_state.is_admin:
+                    if st.button(f"🗑️ 刪除", key=f"del_ann_{index}"):
+                        st.session_state.announcements_df = st.session_state.announcements_df.drop(index)
+                        save_cloud_data('announcements', st.session_state.announcements_df)
+                        st.rerun()
+
+elif menu == "🗓️ 比賽報名與賽程":
+    st.title("🗓️ 賽事報名與賽程管理")
+    if st.session_state.is_admin:
+        with st.expander("➕ 新增比賽"):
+            with st.form("new_tournament", clear_on_submit=True):
+                t_name = st.text_input("比賽名稱")
+                c1, c2 = st.columns(2)
+                t_date = c1.date_input("比賽日期")
+                t_due = c2.date_input("報名截止")
+                t_link = st.text_input("連結")
+                t_note = st.text_area("備註")
+                if st.form_submit_button("發布賽事"):
+                    new_t = pd.DataFrame([{"比賽名稱": t_name, "日期": str(t_date), "截止日期": str(t_due), "連結": t_link, "備註": t_note}])
+                    st.session_state.tournaments_df = pd.concat([st.session_state.tournaments_df, new_t], ignore_index=True)
+                    save_cloud_data('tournaments', st.session_state.tournaments_df)
+                    st.rerun()
+    st.dataframe(st.session_state.tournaments_df, use_container_width=True)
+
+elif menu == "💰 學費與預算核算":
+    st.title("💰 預算與營運核算 (康文署標準)")
+    st.info("收入：該期學生總人數 × 學費。支出：學校按開班數支付給康文署的費用。")
+    
+    col_input_left, col_input_right = st.columns([2, 1])
     
     with col_input_left:
-        st.subheader("🏫 訓練班規模設定")
+        st.subheader("📋 支出設定 (開班數)")
         sc1, sc2, sc3 = st.columns(3)
         with sc1:
-            n_team = st.number_input("校隊班數", value=1, step=1)
-            p_team = 2750 # 每班支出預算
+            n_team = st.number_input("校隊訓練班 (班)", value=1, step=1)
+            cost_team_unit = 2750
         with sc2:
-            n_train = st.number_input("非校隊班數", value=3, step=1)
-            p_train = 1350
+            n_train = st.number_input("非校隊訓練班 (班)", value=3, step=1)
+            cost_train_unit = 1350
         with sc3:
-            n_hobby = st.number_input("興趣班數", value=4, step=1)
-            p_hobby = 1200
+            n_hobby = st.number_input("簡易運動班 (班)", value=4, step=1)
+            cost_hobby_unit = 1200
             
     with col_input_right:
         st.subheader("💵 收入設定")
-        total_stu = st.number_input("預計收生總人數", value=50, step=1)
-        fee_per = st.number_input("每位學生收費 (HKD)", value=250)
+        total_students = st.number_input("該期學生總人數", value=50, step=1)
+        fee_per_student = st.number_input("每位學生學費 ($)", value=250)
 
     st.divider()
     
-    # 計算邏輯
-    total_rev = total_stu * fee_per
-    total_cost = (n_team * p_team) + (n_train * p_train) + (n_hobby * p_hobby)
-    net_profit = total_rev - total_cost
-    
+    total_revenue = total_students * fee_per_student
+    exp_team = n_team * cost_team_unit
+    exp_train = n_train * cost_train_unit
+    exp_hobby = n_hobby * cost_hobby_unit
+    total_expense = exp_team + exp_train + exp_hobby
+    profit = total_revenue - total_expense
+
     m1, m2, m3 = st.columns(3)
-    m1.metric("預期總收入 (學費)", f"${total_rev:,}")
-    m2.metric("預期總支出 (教練/場地)", f"${total_cost:,}")
-    m3.metric("淨盈餘 (Profit)", f"${net_profit:,}", delta=float(net_profit))
-    
-    if net_profit < 0:
-        st.error("⚠️ 注意：目前預算模型顯示赤字！請考慮調整學費或優化開班數量。")
-    else:
-        st.success("✅ 財務模型目前處於健康獲利狀態。")
-        
-    with st.expander("📊 詳細成本拆解"):
-        cost_data = {
-            "班別": ["校隊訓練班", "非校隊訓練班", "興趣/簡易班", "總計"],
-            "數量": [n_team, n_train, n_hobby, n_team+n_train+n_hobby],
-            "單班支出": [p_team, p_train, p_hobby, "-"],
-            "小計": [n_team*p_team, n_train*p_train, n_hobby*p_hobby, total_cost]
-        }
-        st.table(pd.DataFrame(cost_data))
+    m1.metric("預計總收入 (學費)", f"${total_revenue:,}")
+    m2.metric("預計總支出 (開班費)", f"${total_expense:,}")
+    m3.metric("預計淨利潤", f"${profit:,}", delta=float(profit))
 
-# --- 7.6 學生得獎紀錄 ---
-elif menu == "🏅 學生得獎紀錄":
-    st.title("🏅 校外比賽榮譽榜")
-    if st.session_state.is_admin:
-        with st.form("award_input", clear_on_submit=True):
-            st.write("### 新增得獎紀錄")
-            aw_c1, aw_c2 = st.columns(2)
-            aw_name = aw_c1.text_input("獲獎學生姓名")
-            aw_tourn = aw_c2.text_input("賽事名稱")
-            aw_prize = aw_c1.text_input("獲得獎項")
-            aw_date = aw_c2.date_input("獲獎日期")
-            aw_memo = st.text_input("備註 (選填)")
-            if st.form_submit_button("正式發布"):
-                new_award = {
-                    "學生姓名": aw_name, 
-                    "比賽名稱": aw_tourn, 
-                    "獎項": aw_prize, 
-                    "日期": str(aw_date), 
-                    "備註": aw_memo
-                }
-                save_cloud_data('student_awards', pd.concat([awards_df, pd.DataFrame([new_award])], ignore_index=True))
-                st.rerun()
-                
-    if not awards_df.empty:
-        # 按日期降序排列
-        disp_awards = awards_df.sort_values("日期", ascending=False)
-        st.dataframe(disp_awards, use_container_width=True)
-    else:
-        st.info("尚無紀錄。")
-
-# --- 7.7 活動公告 ---
-elif menu == "📢 活動公告":
-    st.title("📢 隊內最新公告")
-    if st.session_state.is_admin:
-        with st.expander("📝 撰寫新公告", expanded=False):
-            with st.form("ann_form"):
-                ann_title = st.text_input("公告標題", placeholder="例如：颱風停課通知")
-                ann_content = st.text_area("詳細內容")
-                if st.form_submit_button("立即發布"):
-                    new_ann = {
-                        "標題": ann_title, 
-                        "內容": ann_content, 
-                        "日期": datetime.now().strftime("%Y-%m-%d %H:%M")
-                    }
-                    save_cloud_data('announcements', pd.concat([announcements_df, pd.DataFrame([new_ann])], ignore_index=True))
-                    st.rerun()
-                    
-    if not announcements_df.empty:
-        for _, row in announcements_df.iloc[::-1].iterrows():
-            with st.chat_message("user"):
-                st.write(f"**【{row['標題']}】**")
-                st.caption(f"發佈時間：{row['日期']}")
-                st.write(row['內容'])
-                st.divider()
-    else:
-        st.info("目前沒有新的公告。")
-
-# --- 7.8 比賽報名與賽程 ---
-elif menu == "🗓️ 比賽報名與賽程":
-    st.title("🗓️ 比賽資訊與快捷報名")
-    
-    if st.session_state.is_admin:
-        with st.expander("🆕 發布新比賽資訊"):
-            with st.form("tourn_form"):
-                t_name = st.text_input("賽事正式名稱")
-                t_date = st.text_input("比賽日期 (文字描述或具體日期)")
-                t_deadline = st.date_input("報名截止日期")
-                t_link = st.text_input("官方報名網址/連結")
-                t_note = st.text_area("參賽資格或其他備註")
-                if st.form_submit_button("確認新增"):
-                    new_t = {
-                        "比賽名稱": t_name, 
-                        "日期": t_date, 
-                        "截止日期": str(t_deadline), 
-                        "連結": t_link, 
-                        "備註": t_note
-                    }
-                    save_cloud_data('tournaments', pd.concat([tournaments_df, pd.DataFrame([new_t])], ignore_index=True))
-                    st.rerun()
-
-    if not tournaments_df.empty:
-        st.write("### 🏆 近期賽事一覽")
-        for _, t in tournaments_df.iterrows():
-            with st.container(border=True):
-                col_t1, col_t2 = st.columns([3, 1])
-                with col_t1:
-                    st.subheader(t['比賽名稱'])
-                    st.write(f"📅 **比賽日期：** {t['日期']}")
-                    st.write(f"⏳ **截止報名：** {t['截止日期']}")
-                    if t['備註']: st.info(f"💡 {t['備註']}")
-                with col_t2:
-                    if t['連結']:
-                        st.link_button("🔗 立即前往報名", t['連結'], use_container_width=True)
-                    else:
-                        st.button("尚未開放", disabled=True, use_container_width=True)
-    else:
-        st.info("目前尚無比賽資訊。")
-
-# 頁尾資訊
-st.sidebar.divider()
-st.sidebar.caption("© 2026 正覺壁球隊管理系統 | V1.5.0")
+    summary_data = {
+        "項目": ["校隊訓練班 (支出)", "非校隊訓練班 (支出)", "簡易運動班 (支出)", "學生學費 (總收入)"],
+        "數量 / 人數": [f"{n_team} 班", f"{n_train} 班", f"{n_hobby} 班", f"{total_students} 人"],
+        "單位金額 ($)": [cost_team_unit, cost_train_unit, cost_hobby_unit, fee_per_student],
+        "小計 ($)": [-exp_team, -exp_train, -exp_hobby, total_revenue]
+    }
+    st.table(pd.DataFrame(summary_data))
+    st.success(f"💡 結算：本期預計營運利潤為 HK$ {profit:,}")
